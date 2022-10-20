@@ -41,6 +41,7 @@ import (
 	"github.com/purpleidea/mgmt/lang/interpolate"
 	"github.com/purpleidea/mgmt/lang/interpret"
 	"github.com/purpleidea/mgmt/lang/parser"
+	"github.com/purpleidea/mgmt/lang/types"
 	"github.com/purpleidea/mgmt/lang/unification"
 	"github.com/purpleidea/mgmt/pgraph"
 	"github.com/purpleidea/mgmt/util"
@@ -1646,6 +1647,230 @@ func TestAstFunc2(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping all tests...")
 	}
+}
+
+func TestChangingFunctionGraph0(t *testing.T) {
+	testIndex := 0
+	testName := "changing the graph after it has stabilized"
+	t.Run(fmt.Sprintf("test #%d (%s)", testIndex, testName), func(t *testing.T) {
+		t.Logf("\n\ntest #%d (%s) ----------------\n\n", testIndex, testName)
+		scope := &interfaces.Scope{ // global scope
+			Variables: map[string]interfaces.Expr{},
+			// all the built-in top-level, core functions enter here...
+			Functions: ast.FuncPrefixToFunctionsScope(""), // runs funcs.LookupPrefix
+		}
+		code := `
+			$r = (2 + 3) - 4
+			test "t" {
+				int64ptr => $r,
+			}
+		`
+
+		str := strings.NewReader(code)
+		xast, err := parser.LexParse(str)
+		if err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: lex/parse failed with: %+v", testIndex, err)
+			return
+		}
+		t.Logf("test #%d: AST: %+v", testIndex, xast)
+
+		data := &interfaces.Data{
+			// TODO: add missing fields here if/when needed
+			StrInterpolater: interpolate.InterpolateStr,
+
+			Debug: testing.Verbose(), // set via the -test.v flag to `go test`
+			Logf: func(format string, v ...interface{}) {
+				t.Logf("ast: "+format, v...)
+			},
+		}
+		// some of this might happen *after* interpolate in SetScope or Unify...
+		if err := xast.Init(data); err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: could not init and validate AST: %+v", testIndex, err)
+			return
+		}
+
+		iast, err := xast.Interpolate()
+		if err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: interpolate failed with: %+v", testIndex, err)
+			return
+		}
+
+		// propagate the scope down through the AST...
+		err = iast.SetScope(scope)
+		if err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: could not set scope: %+v", testIndex, err)
+			return
+		}
+
+		// apply type unification
+		logf := func(format string, v ...interface{}) {
+			t.Logf(fmt.Sprintf("test #%d", testIndex)+": unification: "+format, v...)
+		}
+		unifier := &unification.Unifier{
+			AST:    iast,
+			Solver: unification.SimpleInvariantSolverLogger(logf),
+			Debug:  testing.Verbose(),
+			Logf:   logf,
+		}
+		err = unifier.Unify()
+		if err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: could not unify types: %+v", testIndex, err)
+			return
+		}
+
+		// build the function graph
+		graph, err := iast.Graph()
+		if err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: functions failed with: %+v", testIndex, err)
+			return
+		}
+		t.Logf("test #%d: graph: %+v", testIndex, graph)
+
+		// Print the vertices and edges, to make it easier to write the
+		// later part of the test which finds and removes vertices and
+		// edges by name.
+		for i, v := range graph.Vertices() {
+			t.Logf("test #%d: vertex(%d): %+v", testIndex, i, v)
+		}
+		for v1 := range graph.Adjacency() {
+			for v2, e := range graph.Adjacency()[v1] {
+				t.Logf("test #%d: edge(%+v): %+v -> %+v", testIndex, e, v1, v2)
+			}
+		}
+
+		// run the function engine once to get some real output
+		logf = func(format string, v ...interface{}) {
+			t.Logf(fmt.Sprintf("test #%d", testIndex)+": funcs: "+format, v...)
+		}
+		funcs := &funcs.Engine{
+			Graph:    graph,
+			Hostname: "",                // not used in this test
+			World:    nil,               // not used in this test
+			Debug:    testing.Verbose(), // set via the -test.v flag to `go test`
+			Logf: logf,
+			Glitch: false,
+		}
+
+		logf("function engine initializing...")
+		if err := funcs.Init(); err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: init error with func engine: %+v", testIndex, err)
+			return
+		}
+
+		logf("function engine validating...")
+		if err := funcs.Validate(); err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: validate error with func engine: %+v", testIndex, err)
+			return
+		}
+
+		logf("function engine starting...")
+		// On failure, we expect the caller to run Close() to shutdown all of
+		// the currently initialized (and running) funcs... This is needed if
+		// we successfully ran `Run` but isn't needed only for Init/Validate.
+		if err := funcs.Run(); err != nil {
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: run error with func engine: %+v", testIndex, err)
+			return
+		}
+		// TODO: cleanup before we print any test failures...
+		defer funcs.Close() // cleanup
+
+		// wait for some activity
+		logf("stream...")
+		stream := funcs.Stream()
+		select {
+		case err, ok := <-stream:
+			if !ok {
+				t.Errorf("test #%d: FAIL", testIndex)
+				t.Errorf("test #%d: stream closed", testIndex)
+				return
+			}
+			if err != nil {
+				t.Errorf("test #%d: FAIL", testIndex)
+				t.Errorf("test #%d: stream errored: %+v", testIndex, err)
+				return
+			}
+
+		case <-time.After(60 * time.Second): // blocked functions
+			t.Errorf("test #%d: FAIL", testIndex)
+			t.Errorf("test #%d: stream timeout", testIndex)
+			return
+		}
+
+                // Check that the computed value for $r is (2 + 3) - 4 = 1.
+                findVertexByName := func(name string) (pgraph.Vertex, error) {
+			for vertex := range graph.Adjacency() { // for each vertex in g
+				if (vertex.String() == name) {
+					return vertex, nil
+				}
+			}
+			return nil, fmt.Errorf("findVertexByName: graph has no vertex named \"%s\"", name)
+		}
+                rVertex, err := findVertexByName("var(r)")
+                if err != nil {
+                  t.Errorf("test #%d: FAIL", testIndex)
+                  t.Errorf("test #%d: %s", testIndex, err.Error())
+                  return
+		}
+                rExpr, ok := rVertex.(interfaces.Expr)
+                if !ok {
+                  t.Errorf("test #%d: FAIL", testIndex)
+                  t.Errorf("test #%d: expected the Vertex for $r to be an Expr, got %T", testIndex, rVertex)
+                  return
+                }
+                rValue, err := rExpr.Value()
+                if err != nil {
+                  t.Errorf("test #%d: FAIL", testIndex)
+                  t.Errorf("test #%d: could not get r.Value()", testIndex)
+                  t.Errorf("test #%d: %s", testIndex, err.Error())
+                  return
+                }
+                rIntValue, ok := rValue.(*types.IntValue)
+                if !ok {
+                  t.Errorf("test #%d: FAIL", testIndex)
+                  t.Errorf("test #%d: expected r.Value() to be an IntValue, got %T", testIndex, rValue)
+                  return
+                }
+		if rIntValue.V != 1 {
+                  t.Errorf("test #%d: FAIL", testIndex)
+                  t.Errorf("test #%d: expected r=1, got r=%d", testIndex, rIntValue)
+                  return
+                }
+
+                // TODO: remove the edges and rewire the graph to compute (2 + 5) - 4 instead.
+                lit3, err := findVertexByName("int(3)")
+                if err != nil {
+                  t.Errorf("test #%d: FAIL", testIndex)
+                  t.Errorf("test #%d: %s", testIndex, err.Error())
+                  return
+		}
+                funcs.RemoveVertex(lit3)
+
+                // TODO: compile a single ast node for the number 5 to a single function node
+                //var lit5 interfaces.Expr
+
+                //plus interfaces.Expr
+		//v1, v2, v3 := vtex(`str("t")`), vtex(`str("-")`), vtex(`str("+")`)
+		//v4, v5, v6 := vtex("int(42)"), vtex("int(13)"), vtex("int(99)")
+		//v7 := vtex(fmt.Sprintf(`call:%s(str("+"), int(42), int(13))`, funcs.OperatorFuncName))
+		//v8 := vtex(fmt.Sprintf(`call:%s(str("-"), call:%s(str("+"), int(42), int(13)), int(99))`, funcs.OperatorFuncName, funcs.OperatorFuncName))
+                //funcs.AddVertex(lit5)
+                //funcs.AddEdge(lit5, plus)
+                //funcs.EnableVertex(lit5)
+
+		// TODO wait for r to change
+
+                // TODO: check that the computed value is now (2 + 5) - 4 = 3.
+		// assert(r.Value == 2)
+	})
 }
 
 // TestAstInterpret0 should only be run in limited circumstances. Read the code
