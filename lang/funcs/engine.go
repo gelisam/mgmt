@@ -314,6 +314,212 @@ func (obj *Engine) Validate() error {
 	return nil
 }
 
+// TODO: find all the places which refer to obj.graph and obj.topologicalSort,
+// to make sure they can see the changes after they happen.
+func (obj *Engine) AddVertex(v pgraph.Vertex) {
+	// TODO: edit obj.graph (and obj.topologicalSort?)
+}
+
+func (obj *Engine) AddEdge(v1, v2 pgraph.Vertex, e Edge) {
+	// TODO: edit obj.graph (and obj.topologicalSort?)
+}
+
+// Spawns the two goroutines which forward the values to and from the input
+// and output channels.
+// The goroutines are added to the Engine's WaitGroup. They either terminate
+// at the end of the Engine::Run() execution, when all the nodes are removed,
+// or earlier if a function node decides to modify the function graph as a
+// side-effect.
+func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
+	node := obj.state[vertex]
+	if obj.Debug {
+		obj.SafeLogf("Startup func `%s`", node)
+	}
+
+	init := &interfaces.Init{
+		Hostname: obj.Hostname,
+		Input:    node.input,
+		Output:   node.output,
+		World:    obj.World,
+		Debug:    obj.Debug,
+		Logf: func(format string, v ...interface{}) {
+			obj.Logf("func: "+format, v...)
+		},
+	}
+	if err := node.handle.Init(init); err != nil {
+		return errwrap.Wrapf(err, "could not init func `%s`", node)
+	}
+	node.init = true // we've successfully initialized
+
+	// TODO: spawn the two goroutines
+	incoming := obj.Graph.IncomingGraphVertices(vertex) // []Vertex
+
+	// no incoming edges, so no incoming data
+	if len(incoming) == 0 { // TODO: do this here or earlier?
+		close(node.input)
+	} else {
+		// process function input data
+		obj.wg.Add(1)
+		go func(vertex pgraph.Vertex) {
+			node := obj.state[vertex]
+			defer obj.wg.Done()
+			defer close(node.input)
+			var ready bool
+			// the final closing output to this, closes this
+			for range node.notify { // new input values
+				// now build the struct if we can...
+
+				ready = true // assume for now...
+				si := &types.Type{
+					// input to functions are structs
+					Kind: types.KindStruct,
+					Map:  node.handle.Info().Sig.Map,
+					Ord:  node.handle.Info().Sig.Ord,
+				}
+				st := types.NewStruct(si)
+				for _, v := range incoming {
+					args := obj.Graph.Adjacency()[v][vertex].(*Edge).Args
+					from := obj.state[v]
+					obj.mutex.RLock()
+					value, exists := obj.table[v]
+					obj.mutex.RUnlock()
+					if !exists {
+						ready = false // nope!
+						break
+					}
+
+					// set each arg, since one value
+					// could get used for multiple
+					// function inputs (shared edge)
+					for _, arg := range args {
+						err := st.Set(arg, value) // populate struct
+						if err != nil {
+							panic(fmt.Sprintf("struct set failure on `%s` from `%s`: %v", node, from, err))
+						}
+					}
+				}
+				if !ready {
+					continue
+				}
+
+				select {
+				case node.input <- st: // send to function
+
+				case <-obj.closeChan:
+					return
+				}
+			}
+		}(vertex)
+	}
+
+	obj.wg.Add(1)
+	go func(vertex pgraph.Vertex) { // run function
+		node := obj.state[vertex]
+		defer obj.wg.Done()
+		if obj.Debug {
+			obj.SafeLogf("Running func `%s`", node)
+		}
+		err := node.handle.Stream()
+		if obj.Debug {
+			obj.SafeLogf("Exiting func `%s`", node)
+		}
+		if err != nil {
+			// we closed with an error...
+			err := errwrap.Wrapf(err, "problem streaming func `%s`", node)
+			select {
+			case obj.ag <- err: // send to aggregate channel
+
+			case <-obj.closeChan:
+				return
+			}
+		}
+	}(vertex)
+
+	obj.wg.Add(1)
+	go func(vertex pgraph.Vertex) { // process function output data
+		node := obj.state[vertex]
+		defer obj.wg.Done()
+		defer obj.agDone(vertex)
+		outgoing := obj.Graph.OutgoingGraphVertices(vertex) // []Vertex
+		for value := range node.output {                    // read from channel
+			obj.mutex.RLock()
+			cached, exists := obj.table[vertex]
+			obj.mutex.RUnlock()
+			if !exists { // first value received
+				// RACE: do this AFTER value is present!
+				//node.loaded = true // not yet please
+				obj.Logf("func `%s` started", node)
+			} else if value.Cmp(cached) == nil {
+				// skip if new value is same as previous
+				// if this happens often, it *might* be
+				// a bug in the function implementation
+				// FIXME: do we need to disable engine
+				// caching when using hysteresis?
+				obj.Logf("func `%s` skipped", node)
+				continue
+			}
+			obj.mutex.Lock()
+			// XXX: maybe we can get rid of the table...
+			obj.table[vertex] = value // save the latest
+			node.mutex.Lock()
+			if err := node.Expr.SetValue(value); err != nil {
+				node.mutex.Unlock() // don't block node.String()
+				panic(fmt.Sprintf("could not set value for `%s`: %+v", node, err))
+			}
+			node.loaded = true // set *after* value is in :)
+			obj.Logf("func `%s` changed", node)
+			node.mutex.Unlock()
+			obj.mutex.Unlock()
+
+			// FIXME: will this actually prevent glitching?
+			// if we only notify the aggregate channel when
+			// we're at the bottom of the topo sort (eg: no
+			// outgoing vertices to notify) then we'll have
+			// a glitch free subtree in the programs ast...
+			if obj.Glitch || len(outgoing) == 0 {
+				select {
+				case obj.ag <- nil: // send to aggregate channel
+
+				case <-obj.closeChan:
+					return
+				}
+			}
+
+			// notify the receiving vertices
+			for _, v := range outgoing {
+				node := obj.state[v]
+				select {
+				case node.notify <- struct{}{}:
+
+				case <-obj.closeChan:
+					return
+				}
+			}
+		}
+		// no more output values are coming...
+		obj.Logf("func `%s` stopped", node)
+
+		// nodes that never loaded will cause the engine to hang
+		if !node.loaded {
+			select {
+			case obj.ag <- fmt.Errorf("func `%s` stopped before it was loaded", node):
+			case <-obj.closeChan:
+				return
+			}
+		}
+	}(vertex)
+
+	return nil
+}
+
+// Also terminates the associated goroutines ("disables" the vertex), and
+// removes the incoming and outgoing edges.
+func (obj *Engine) RemoveVertex(v pgraph.Vertex) {
+  // TODO: stop the two goroutines
+  // TODO: edit obj.graph (and obj.topologicalSort?)
+}
+
+
 // Run starts up this function engine and gets it all running. It errors if the
 // startup failed for some reason. On success, use the Stream and Table methods
 // for future interaction with the engine, and the Close method to shut it off.
@@ -329,185 +535,14 @@ func (obj *Engine) Run() error {
 	// for to startup and that they are slow and blocking everyone, and then
 	// fail permanently after the timeout so that bad code can't block this!
 
-	// loop through all funcs that we might need
+	// Enable all the funcs, causing them to start sending values to each
+	// other.
 	obj.agAdd(len(obj.topologicalSort))
 	for _, vertex := range obj.topologicalSort {
-		node := obj.state[vertex]
-		if obj.Debug {
-			obj.SafeLogf("Startup func `%s`", node)
+		err := obj.EnableVertex(vertex)
+		if err != nil {
+			return err
 		}
-
-		incoming := obj.Graph.IncomingGraphVertices(vertex) // []Vertex
-
-		init := &interfaces.Init{
-			Hostname: obj.Hostname,
-			Input:    node.input,
-			Output:   node.output,
-			World:    obj.World,
-			Debug:    obj.Debug,
-			Logf: func(format string, v ...interface{}) {
-				obj.Logf("func: "+format, v...)
-			},
-		}
-		if err := node.handle.Init(init); err != nil {
-			return errwrap.Wrapf(err, "could not init func `%s`", node)
-		}
-		node.init = true // we've successfully initialized
-
-		// no incoming edges, so no incoming data
-		if len(incoming) == 0 { // TODO: do this here or earlier?
-			close(node.input)
-		} else {
-			// process function input data
-			obj.wg.Add(1)
-			go func(vertex pgraph.Vertex) {
-				node := obj.state[vertex]
-				defer obj.wg.Done()
-				defer close(node.input)
-				var ready bool
-				// the final closing output to this, closes this
-				for range node.notify { // new input values
-					// now build the struct if we can...
-
-					ready = true // assume for now...
-					si := &types.Type{
-						// input to functions are structs
-						Kind: types.KindStruct,
-						Map:  node.handle.Info().Sig.Map,
-						Ord:  node.handle.Info().Sig.Ord,
-					}
-					st := types.NewStruct(si)
-					for _, v := range incoming {
-						args := obj.Graph.Adjacency()[v][vertex].(*Edge).Args
-						from := obj.state[v]
-						obj.mutex.RLock()
-						value, exists := obj.table[v]
-						obj.mutex.RUnlock()
-						if !exists {
-							ready = false // nope!
-							break
-						}
-
-						// set each arg, since one value
-						// could get used for multiple
-						// function inputs (shared edge)
-						for _, arg := range args {
-							err := st.Set(arg, value) // populate struct
-							if err != nil {
-								panic(fmt.Sprintf("struct set failure on `%s` from `%s`: %v", node, from, err))
-							}
-						}
-					}
-					if !ready {
-						continue
-					}
-
-					select {
-					case node.input <- st: // send to function
-
-					case <-obj.closeChan:
-						return
-					}
-				}
-			}(vertex)
-		}
-
-		obj.wg.Add(1)
-		go func(vertex pgraph.Vertex) { // run function
-			node := obj.state[vertex]
-			defer obj.wg.Done()
-			if obj.Debug {
-				obj.SafeLogf("Running func `%s`", node)
-			}
-			err := node.handle.Stream()
-			if obj.Debug {
-				obj.SafeLogf("Exiting func `%s`", node)
-			}
-			if err != nil {
-				// we closed with an error...
-				err := errwrap.Wrapf(err, "problem streaming func `%s`", node)
-				select {
-				case obj.ag <- err: // send to aggregate channel
-
-				case <-obj.closeChan:
-					return
-				}
-			}
-		}(vertex)
-
-		obj.wg.Add(1)
-		go func(vertex pgraph.Vertex) { // process function output data
-			node := obj.state[vertex]
-			defer obj.wg.Done()
-			defer obj.agDone(vertex)
-			outgoing := obj.Graph.OutgoingGraphVertices(vertex) // []Vertex
-			for value := range node.output {                    // read from channel
-				obj.mutex.RLock()
-				cached, exists := obj.table[vertex]
-				obj.mutex.RUnlock()
-				if !exists { // first value received
-					// RACE: do this AFTER value is present!
-					//node.loaded = true // not yet please
-					obj.Logf("func `%s` started", node)
-				} else if value.Cmp(cached) == nil {
-					// skip if new value is same as previous
-					// if this happens often, it *might* be
-					// a bug in the function implementation
-					// FIXME: do we need to disable engine
-					// caching when using hysteresis?
-					obj.Logf("func `%s` skipped", node)
-					continue
-				}
-				obj.mutex.Lock()
-				// XXX: maybe we can get rid of the table...
-				obj.table[vertex] = value // save the latest
-				node.mutex.Lock()
-				if err := node.Expr.SetValue(value); err != nil {
-					node.mutex.Unlock() // don't block node.String()
-					panic(fmt.Sprintf("could not set value for `%s`: %+v", node, err))
-				}
-				node.loaded = true // set *after* value is in :)
-				obj.Logf("func `%s` changed", node)
-				node.mutex.Unlock()
-				obj.mutex.Unlock()
-
-				// FIXME: will this actually prevent glitching?
-				// if we only notify the aggregate channel when
-				// we're at the bottom of the topo sort (eg: no
-				// outgoing vertices to notify) then we'll have
-				// a glitch free subtree in the programs ast...
-				if obj.Glitch || len(outgoing) == 0 {
-					select {
-					case obj.ag <- nil: // send to aggregate channel
-
-					case <-obj.closeChan:
-						return
-					}
-				}
-
-				// notify the receiving vertices
-				for _, v := range outgoing {
-					node := obj.state[v]
-					select {
-					case node.notify <- struct{}{}:
-
-					case <-obj.closeChan:
-						return
-					}
-				}
-			}
-			// no more output values are coming...
-			obj.Logf("func `%s` stopped", node)
-
-			// nodes that never loaded will cause the engine to hang
-			if !node.loaded {
-				select {
-				case obj.ag <- fmt.Errorf("func `%s` stopped before it was loaded", node):
-				case <-obj.closeChan:
-					return
-				}
-			}
-		}(vertex)
 	}
 
 	// send event on streamChan when any of the (aggregated) facts change
