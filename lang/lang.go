@@ -244,7 +244,6 @@ func (obj *Lang) Init() error {
 	}
 
 	obj.funcs = &funcs.Engine{
-		Graph:    graph, // not the same as the output graph!
 		Hostname: obj.Hostname,
 		World:    obj.World,
 		Debug:    obj.Debug,
@@ -255,7 +254,7 @@ func (obj *Lang) Init() error {
 	}
 
 	obj.Logf("function engine initializing...")
-	if err := obj.funcs.Init(); err != nil {
+	if err := obj.funcs.Init(graph); err != nil {
 		return errwrap.Wrapf(err, "init error with func engine")
 	}
 

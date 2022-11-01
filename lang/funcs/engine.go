@@ -101,7 +101,6 @@ func (obj *Edge) String() string {
 
 // Engine represents the running time varying directed acyclic function graph.
 type Engine struct {
-	Graph    *pgraph.Graph
 	Hostname string
 	World    engine.World
 	Debug    bool
@@ -114,6 +113,7 @@ type Engine struct {
 	agLock  *sync.Mutex
 	agCount int // last one turns out the light (closes the ag channel)
 
+	graph    *pgraph.Graph
 	topologicalSort []pgraph.Vertex // cached sorting of the graph for perf
 
 	stateMutex *sync.RWMutex       // concurrency guard for the state map
@@ -134,9 +134,7 @@ type Engine struct {
 // Init initializes the struct. This is the first call you must make. Do not
 // proceed with calls to other methods unless this succeeds first. This also
 // loads all the functions by calling Init on each one in the graph.
-// TODO: should Init take the graph as an input arg to keep it as a private
-// field?
-func (obj *Engine) Init() error {
+func (obj *Engine) Init(initialGraph *pgraph.Graph) error {
 	obj.ag = make(chan error)
 	obj.agLock = &sync.Mutex{}
 	obj.stateMutex = &sync.RWMutex{}
@@ -147,13 +145,14 @@ func (obj *Engine) Init() error {
 	obj.streamChan = make(chan error)
 	obj.closeChan = make(chan struct{})
 	obj.wg = &sync.WaitGroup{}
-	topologicalSort, err := obj.Graph.TopologicalSort()
+        obj.graph = initialGraph
+	topologicalSort, err := initialGraph.TopologicalSort()
 	if err != nil {
 		return errwrap.Wrapf(err, "topo sort failed")
 	}
 	obj.topologicalSort = topologicalSort // cache the result
 
-	for _, vertex := range obj.Graph.Vertices() {
+	for _, vertex := range obj.graph.Vertices() {
 		// is this an interface we can use?
 
 		obj.stateMutex.RLock()
@@ -205,7 +204,7 @@ func (obj *Engine) Validate() error {
 	}
 	var err error
 	ptrs := []interfaces.Func{} // Func is a ptr
-	for _, vertex := range obj.Graph.Vertices() {
+	for _, vertex := range obj.graph.Vertices() {
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
 		obj.stateMutex.RUnlock()
@@ -217,7 +216,7 @@ func (obj *Engine) Validate() error {
 		}
 		ptrs = append(ptrs, node.handle)
 	}
-	for _, edge := range obj.Graph.Edges() {
+	for _, edge := range obj.graph.Edges() {
 		if _, ok := edge.(*Edge); !ok {
 			e := fmt.Errorf("edge `%s` was not the correct type", edge)
 			err = errwrap.Append(err, e)
@@ -228,7 +227,7 @@ func (obj *Engine) Validate() error {
 	}
 
 	// check if vertices expecting inputs have them
-	for vertex, count := range obj.Graph.InDegree() {
+	for vertex, count := range obj.graph.InDegree() {
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
 		obj.stateMutex.RUnlock()
@@ -244,7 +243,7 @@ func (obj *Engine) Validate() error {
 
 	// expected vertex -> argName
 	expected := make(map[*State]map[string]int) // expected input fields
-	for vertex1 := range obj.Graph.Adjacency() {
+	for vertex1 := range obj.graph.Adjacency() {
 		// check for outputs that don't go anywhere?
 		//obj.stateMutex.RLock()
 		//node1 := obj.state[vertex1]
@@ -254,7 +253,7 @@ func (obj *Engine) Validate() error {
 		//		// an output value goes nowhere...
 		//	}
 		//}
-		for vertex2 := range obj.Graph.Adjacency()[vertex1] { // populate
+		for vertex2 := range obj.graph.Adjacency()[vertex1] { // populate
 			obj.stateMutex.RLock()
 			node2 := obj.state[vertex2]
 			obj.stateMutex.RUnlock()
@@ -265,11 +264,11 @@ func (obj *Engine) Validate() error {
 		}
 	}
 
-	for vertex1 := range obj.Graph.Adjacency() {
+	for vertex1 := range obj.graph.Adjacency() {
 		obj.stateMutex.RLock()
 		node1 := obj.state[vertex1]
 		obj.stateMutex.RUnlock()
-		for vertex2, edge := range obj.Graph.Adjacency()[vertex1] {
+		for vertex2, edge := range obj.graph.Adjacency()[vertex1] {
 			obj.stateMutex.RLock()
 			node2 := obj.state[vertex2]
 			obj.stateMutex.RUnlock()
@@ -379,7 +378,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
         node.mutex.Unlock()
 
 	// TODO: spawn the two goroutines
-	incoming := obj.Graph.IncomingGraphVertices(vertex) // []Vertex
+	incoming := obj.graph.IncomingGraphVertices(vertex) // []Vertex
 
 	// no incoming edges, so no incoming data
 	if len(incoming) == 0 { // TODO: do this here or earlier?
@@ -407,7 +406,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 				}
 				st := types.NewStruct(si)
 				for _, v := range incoming {
-					args := obj.Graph.Adjacency()[v][vertex].(*Edge).Args
+					args := obj.graph.Adjacency()[v][vertex].(*Edge).Args
 					obj.stateMutex.RLock()
 					from := obj.state[v]
 					obj.stateMutex.RUnlock()
@@ -475,7 +474,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 		obj.stateMutex.RUnlock()
 		defer obj.wg.Done()
 		defer obj.agDone(vertex)
-		outgoing := obj.Graph.OutgoingGraphVertices(vertex) // []Vertex
+		outgoing := obj.graph.OutgoingGraphVertices(vertex) // []Vertex
 		for value := range node.output {                    // read from channel
 			obj.tableMutex.RLock()
 			cached, exists := obj.table[vertex]
@@ -686,10 +685,10 @@ func (obj *Engine) agDone(vertex pgraph.Vertex) {
 
 	// FIXME: (perf) cache this into a table which we narrow down with each
 	// successive call. look at the outgoing vertices that I would affect...
-	for _, v := range obj.Graph.OutgoingGraphVertices(vertex) { // close for each one
+	for _, v := range obj.graph.OutgoingGraphVertices(vertex) { // close for each one
 		// now determine who provides inputs to that vertex...
 		var closed = true
-		for _, vv := range obj.Graph.IncomingGraphVertices(v) {
+		for _, vv := range obj.graph.IncomingGraphVertices(v) {
 			// are they all closed?
 			if !obj.state[vv].closed {
 				closed = false

@@ -1500,7 +1500,6 @@ func TestAstFunc2(t *testing.T) {
 
 			// run the function engine once to get some real output
 			funcs := &funcs.Engine{
-				Graph:    graph,             // not the same as the output graph!
 				Hostname: "",                // NOTE: empty b/c not used
 				World:    world,             // used partially in some tests
 				Debug:    testing.Verbose(), // set via the -test.v flag to `go test`
@@ -1511,7 +1510,7 @@ func TestAstFunc2(t *testing.T) {
 			}
 
 			logf("function engine initializing...")
-			if err := funcs.Init(); err != nil {
+			if err := funcs.Init(graph); err != nil {
 				t.Errorf("test #%d: FAIL", index)
 				t.Errorf("test #%d: init error with func engine: %+v", index, err)
 				return
@@ -1749,7 +1748,6 @@ func TestChangingFunctionGraph0(t *testing.T) {
 			t.Logf(fmt.Sprintf("test #%d", testIndex)+": funcs: "+format, v...)
 		}
 		funcs := &funcs.Engine{
-			Graph:    graph,
 			Hostname: "",                // not used in this test
 			World:    nil,               // not used in this test
 			Debug:    testing.Verbose(), // set via the -test.v flag to `go test`
@@ -1758,7 +1756,7 @@ func TestChangingFunctionGraph0(t *testing.T) {
 		}
 
 		logf("function engine initializing...")
-		if err := funcs.Init(); err != nil {
+		if err := funcs.Init(graph); err != nil {
 			t.Errorf("test #%d: FAIL", testIndex)
 			t.Errorf("test #%d: init error with func engine: %+v", testIndex, err)
 			return
