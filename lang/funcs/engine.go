@@ -36,6 +36,7 @@ type State struct {
 
 	handle interfaces.Func // the function (if not nil, we've found it on init)
 
+        enabled bool // has EnableVertex() been called yet?
 	init   bool // have we run Init on our func?
 	ready  bool // has it received all the args it needs at least once?
 	loaded bool // has the func run at least once ?
@@ -113,6 +114,7 @@ type Engine struct {
 	agLock  *sync.Mutex
 	agCount int // last one turns out the light (closes the ag channel)
 
+        graphMutex *sync.RWMutex        // concurrency guard for the graph
 	graph    *pgraph.Graph
 	topologicalSort []pgraph.Vertex // cached sorting of the graph for perf
 
@@ -141,48 +143,38 @@ func (obj *Engine) Init(initialGraph *pgraph.Graph) error {
 	obj.state = make(map[pgraph.Vertex]*State)
 	obj.tableMutex = &sync.RWMutex{}
 	obj.table = make(map[pgraph.Vertex]types.Value)
+	obj.graphMutex = &sync.RWMutex{}
 	obj.loadedChan = make(chan struct{})
 	obj.streamChan = make(chan error)
 	obj.closeChan = make(chan struct{})
 	obj.wg = &sync.WaitGroup{}
-        obj.graph = initialGraph
+        var err error
+        obj.graph, err = pgraph.NewGraph(initialGraph.Name)
+	if err != nil {
+		return errwrap.Wrapf(err, "NewGraph failed")
+	}
 	topologicalSort, err := initialGraph.TopologicalSort()
 	if err != nil {
 		return errwrap.Wrapf(err, "topo sort failed")
 	}
 	obj.topologicalSort = topologicalSort // cache the result
 
-	for _, vertex := range obj.graph.Vertices() {
-		// is this an interface we can use?
-
-		obj.stateMutex.RLock()
-		_, exists := obj.state[vertex]
-		obj.stateMutex.RUnlock()
-		if exists {
-			return fmt.Errorf("vertex (%+v) is not unique in the graph", vertex)
-		}
-
-		expr, ok := vertex.(interfaces.Expr)
-		if !ok {
-			return fmt.Errorf("vertex (%+v) was not an expr", vertex)
-		}
-
-		if obj.Debug {
-			obj.Logf("Loading func `%s`", vertex)
-		}
-
-		state := &State{Expr: expr}
-		e1 := state.Init()
+        var errors error
+	for _, vertex := range initialGraph.Vertices() {
+		e1 := obj.AddVertex(vertex)
 		e2 := errwrap.Wrapf(e1, "error loading func `%s`", vertex)
-		err = errwrap.Append(err, e2) // list of errors
+		errors = errwrap.Append(errors, e2) // list of errors
+	}
+	for vertex1, outgoingEdges := range initialGraph.Adjacency() {
+		for vertex2, edge := range outgoingEdges {
+			e := obj.AddEdge(vertex1, vertex2, edge)
+			errors = errwrap.Append(errors, e) // list of errors
+		}
+	}
+        if errors != nil { // usually due to `not found` errors
+                return errwrap.Wrapf(errors, "could not load requested graph")
+        }
 
-		obj.stateMutex.Lock()
-		obj.state[vertex] = state // store some state!
-		obj.stateMutex.Unlock()
-	}
-	if err != nil { // usually due to `not found` errors
-		return errwrap.Wrapf(err, "could not load requested funcs")
-	}
 	return nil
 }
 
@@ -204,6 +196,8 @@ func (obj *Engine) Validate() error {
 	}
 	var err error
 	ptrs := []interfaces.Func{} // Func is a ptr
+	defer obj.graphMutex.RUnlock()
+	obj.graphMutex.RLock()
 	for _, vertex := range obj.graph.Vertices() {
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
@@ -338,12 +332,67 @@ func (obj *Engine) Validate() error {
 
 // TODO: find all the places which refer to obj.graph and obj.topologicalSort,
 // to make sure they can see the changes after they happen.
-func (obj *Engine) AddVertex(v pgraph.Vertex) {
-	// TODO: edit obj.graph (and obj.topologicalSort?)
+func (obj *Engine) AddVertex(vertex pgraph.Vertex) error {
+	// is this an interface we can use?
+
+	obj.stateMutex.RLock()
+	_, exists := obj.state[vertex]
+	obj.stateMutex.RUnlock()
+	if exists {
+		return fmt.Errorf("vertex (%+v) was already added", vertex)
+	}
+
+	expr, ok := vertex.(interfaces.Expr)
+	if !ok {
+		return fmt.Errorf("vertex (%+v) was not an expr", vertex)
+	}
+
+	if obj.Debug {
+		obj.Logf("Loading func `%s`", vertex)
+	}
+
+	state := &State{Expr: expr}
+	err := state.Init()
+	if err != nil {
+		return nil
+	}
+
+	obj.stateMutex.Lock()
+	obj.state[vertex] = state // store some state!
+	obj.stateMutex.Unlock()
+	
+	obj.graphMutex.Lock()
+	obj.graph.AddVertex(vertex)
+	obj.graphMutex.Unlock()
+	
+	return nil
 }
 
-func (obj *Engine) AddEdge(v1, v2 pgraph.Vertex, e Edge) {
-	// TODO: edit obj.graph (and obj.topologicalSort?)
+func (obj *Engine) AddEdge(v1, v2 pgraph.Vertex, e pgraph.Edge) error {
+	obj.stateMutex.RLock()
+        node1 := obj.state[v1]
+        node2 := obj.state[v2]
+	obj.stateMutex.RUnlock()
+
+	node1.mutex.RLock()
+	enabled1 := node1.enabled
+	node1.mutex.RUnlock()
+        if enabled1 {
+		return fmt.Errorf("cannot add edge because vertex (%+v) is already enabled", v1)
+        }
+
+	node2.mutex.RLock()
+	enabled2 := node2.enabled
+	node2.mutex.RUnlock()
+        if enabled2 {
+		return fmt.Errorf("cannot add edge because vertex (%+v) is already enabled", v2)
+        }
+
+	obj.graphMutex.Lock()
+	obj.graph.AddEdge(v1, v2, e)
+	obj.graphMutex.Unlock()
+	
+	return nil
 }
 
 // Spawns the two goroutines which forward the values to and from the input
@@ -353,9 +402,15 @@ func (obj *Engine) AddEdge(v1, v2 pgraph.Vertex, e Edge) {
 // or earlier if a function node decides to modify the function graph as a
 // side-effect.
 func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
-	obj.stateMutex.RLock()
+	obj.stateMutex.Lock()
 	node := obj.state[vertex]
-	obj.stateMutex.RUnlock()
+        enabled := node.enabled
+        node.enabled = true
+	obj.stateMutex.Unlock()
+        if enabled {
+		return fmt.Errorf("vertex (%+v) already enabled", vertex)
+        }
+        
 	if obj.Debug {
 		obj.SafeLogf("Startup func `%s`", node)
 	}
@@ -377,8 +432,9 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 	node.init = true // we've successfully initialized
         node.mutex.Unlock()
 
-	// TODO: spawn the two goroutines
+	obj.graphMutex.RLock()
 	incoming := obj.graph.IncomingGraphVertices(vertex) // []Vertex
+	obj.graphMutex.RUnlock()
 
 	// no incoming edges, so no incoming data
 	if len(incoming) == 0 { // TODO: do this here or earlier?
@@ -406,7 +462,9 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 				}
 				st := types.NewStruct(si)
 				for _, v := range incoming {
+					obj.graphMutex.RLock()
 					args := obj.graph.Adjacency()[v][vertex].(*Edge).Args
+					obj.graphMutex.RUnlock()
 					obj.stateMutex.RLock()
 					from := obj.state[v]
 					obj.stateMutex.RUnlock()
@@ -474,7 +532,9 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 		obj.stateMutex.RUnlock()
 		defer obj.wg.Done()
 		defer obj.agDone(vertex)
+		obj.graphMutex.RLock()
 		outgoing := obj.graph.OutgoingGraphVertices(vertex) // []Vertex
+		obj.graphMutex.RUnlock()
 		for value := range node.output {                    // read from channel
 			obj.tableMutex.RLock()
 			cached, exists := obj.table[vertex]
@@ -685,12 +745,17 @@ func (obj *Engine) agDone(vertex pgraph.Vertex) {
 
 	// FIXME: (perf) cache this into a table which we narrow down with each
 	// successive call. look at the outgoing vertices that I would affect...
+        defer obj.graphMutex.RUnlock()
+        obj.graphMutex.RLock()
 	for _, v := range obj.graph.OutgoingGraphVertices(vertex) { // close for each one
 		// now determine who provides inputs to that vertex...
 		var closed = true
 		for _, vv := range obj.graph.IncomingGraphVertices(v) {
 			// are they all closed?
-			if !obj.state[vv].closed {
+                        obj.stateMutex.RLock()
+                        isClosed := obj.state[vv].closed
+                        obj.stateMutex.RUnlock()
+			if !isClosed {
 				closed = false
 				break
 			}
