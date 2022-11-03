@@ -166,7 +166,11 @@ func (obj *Engine) Init(initialGraph *pgraph.Graph) error {
 	}
 	for vertex1, outgoingEdges := range initialGraph.Adjacency() {
 		for vertex2, edge := range outgoingEdges {
-			e := obj.AddEdge(vertex1.(interfaces.Expr), vertex2.(interfaces.Expr), edge)
+			e := obj.AddEdge(
+				vertex1.(interfaces.Expr),
+				vertex2.(interfaces.Expr),
+				edge.(*Edge),
+			)
 			errors = errwrap.Append(errors, e) // list of errors
 		}
 	}
@@ -365,7 +369,7 @@ func (obj *Engine) AddVertex(vertex interfaces.Expr) error {
 	return nil
 }
 
-func (obj *Engine) AddEdge(v1, v2 interfaces.Expr, e pgraph.Edge) error {
+func (obj *Engine) AddEdge(v1, v2 interfaces.Expr, e *Edge) error {
 	obj.stateMutex.RLock()
         node1 := obj.state[v1]
         node2 := obj.state[v2]
