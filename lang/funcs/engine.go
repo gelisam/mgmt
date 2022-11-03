@@ -50,6 +50,10 @@ type State struct {
 	mutex *sync.RWMutex // concurrency guard, both for modifying the fields
 			    // of this struct and for calling String() and
 			    // SetValue() on the associated Expr.
+
+	closeChan chan struct{} // close signal, causing the goroutines started
+				// by EnableVertex() to shut down.
+	wg        *sync.WaitGroup
 }
 
 // Init creates the function state if it can be found in the registered list.
@@ -76,6 +80,9 @@ func (obj *State) Init() error {
 	obj.output = make(chan types.Value) // we create it, func closes it
 
 	obj.mutex = &sync.RWMutex{}
+
+	obj.closeChan = make(chan struct{})
+	obj.wg = &sync.WaitGroup{}
 
 	return nil
 }
@@ -396,13 +403,30 @@ func (obj *Engine) AddEdge(v1, v2 interfaces.Expr, e *Edge) error {
 	return nil
 }
 
-// Spawns the two goroutines which forward the values to and from the input
-// and output channels.
-// The goroutines are added to the Engine's WaitGroup. They either terminate
-// at the end of the Engine::Run() execution, when all the nodes are removed,
-// or earlier if a function node decides to modify the function graph as a
-// side-effect.
+// Each node can have multiple input edges, and can be connected to multiple
+// output edges. The node needs a value from every input in order to process
+// this incoming data, and once the node produces an output, that output value
+// is sent along every output edge. To allow the node to focus on transforming
+// input values to output values, the work is divided among three goroutines
+// spawned by Engine::EnableVertex():
+//
+// 1. Waiting until every input edge has provided at least one value, and
+//    combining those values into a single struct.
+// 2. The node's Expr::Stream() function.
+// 3. Copying the output value to every output edge.
+//
+// Those goroutines can be terminated in two different ways:
+//
+// 1. When Engine::RemoveVertex() is called, the State's closeChan channel is closed,
+// and only the goroutines for this node terminate.
+// 2. When Engine::Close() is called, the Engine's closeChan channel is closed,
+// and the goroutines for all the nodes terminate.
+//
+// For constants, the goroutines terminate earlier on their own once there is
+// no more work to do.
 func (obj *Engine) EnableVertex(vertex interfaces.Expr) error {
+        // TODO: cause the upstream and downstream goroutines to refresh their edges
+
 	obj.stateMutex.Lock()
 	node := obj.state[vertex]
         enabled := node.enabled
@@ -433,183 +457,257 @@ func (obj *Engine) EnableVertex(vertex interfaces.Expr) error {
 	node.init = true // we've successfully initialized
         node.mutex.Unlock()
 
+	// First goroutine: waiting until every input edge has provided at
+	// least one value, and combining those values into a single struct.
 	obj.graphMutex.RLock()
 	incoming := obj.graph.IncomingGraphVertices(vertex) // []Vertex
 	obj.graphMutex.RUnlock()
-
-	// no incoming edges, so no incoming data
-	if len(incoming) == 0 { // TODO: do this here or earlier?
+	if len(incoming) == 0 {
+		// For constant nodes, we can terminate the first goroutine
+		// early (we don't even bother spawning it at all). Close
+		// Expr::Stream()'s input channel in order to give the second
+		// goroutine an opportunity to end early as well.
 		close(node.input)
 	} else {
 		// process function input data
 		obj.wg.Add(1)
+                node.wg.Add(1)
 		go func(vertex interfaces.Expr) {
 			obj.stateMutex.RLock()
 			node := obj.state[vertex]
 			obj.stateMutex.RUnlock()
 			defer obj.wg.Done()
-			defer close(node.input)
-			var ready bool
-			// the final closing output to this, closes this
-			for range node.notify { // new input values
-				// now build the struct if we can...
+			defer node.wg.Done()
+			defer close(node.input)	// When the first goroutine
+						// terminates, close
+						// Expr::Stream()'s input
+						// channel so that the second
+						// goroutine terminates as
+						// well.
+			var ready  bool
+			for {
+				select {
+				case <- node.notify:
+					// New input values are available, but
+					// we aren't ready to forward those
+					// inputs to the node until we have a
+					// starting value for _all_ the inputs.
+					// Once we do, we forward the new
+					// combination of inputs to the node
+					// each time _one_ of the inputs
+					// change.
 
-				ready = true // assume for now...
-				si := &types.Type{
-					// input to functions are structs
-					Kind: types.KindStruct,
-					Map:  node.handle.Info().Sig.Map,
-					Ord:  node.handle.Info().Sig.Ord,
-				}
-				st := types.NewStruct(si)
-				for _, v := range incoming {
-					obj.graphMutex.RLock()
-					args := obj.graph.Adjacency()[v][vertex].(*Edge).Args
-					obj.graphMutex.RUnlock()
-					obj.stateMutex.RLock()
-					from := obj.state[v]
-					obj.stateMutex.RUnlock()
-					obj.tableMutex.RLock()
-					value, exists := obj.table[v]
-					obj.tableMutex.RUnlock()
-					if !exists {
-						ready = false // nope!
-						break
+					ready = true	// Later set to false if any of
+							// the inputs is missing a
+							// starting value.
+					si := &types.Type{
+						// input to functions are structs
+						Kind: types.KindStruct,
+						Map:  node.handle.Info().Sig.Map,
+						Ord:  node.handle.Info().Sig.Ord,
 					}
+					st := types.NewStruct(si)
+					for _, v := range incoming {
+						obj.graphMutex.RLock()
+						args := obj.graph.Adjacency()[v][vertex].(*Edge).Args
+						obj.graphMutex.RUnlock()
+						obj.stateMutex.RLock()
+						from := obj.state[v]
+						obj.stateMutex.RUnlock()
+						obj.tableMutex.RLock()
+						value, exists := obj.table[v]
+						obj.tableMutex.RUnlock()
+						if !exists {
+							ready = false
+							break
+						}
 
-					// set each arg, since one value
-					// could get used for multiple
-					// function inputs (shared edge)
-					for _, arg := range args {
-						err := st.Set(arg, value) // populate struct
-						if err != nil {
-							panic(fmt.Sprintf("struct set failure on `%s` from `%s`: %v", node, from, err))
+						// set each arg, since one value
+						// could get used for multiple
+						// function inputs (shared edge)
+						for _, arg := range args {
+							err := st.Set(arg, value) // populate struct
+							if err != nil {
+								node.mutex.RLock()
+								msg := fmt.Sprintf("struct set failure on `%s` from `%s`: %v", node, from, err)
+								node.mutex.RUnlock()
+								panic(msg)
+							}
 						}
 					}
-				}
-				if !ready {
-					continue
-				}
+					if ready {
+						// Send the struct to Expr::Stream()
+						select {
+						case node.input <- st:
 
-				select {
-				case node.input <- st: // send to function
+						case <-obj.closeChan:
+							return
+						case <-node.closeChan:
+							return
+						}
+					}
 
 				case <-obj.closeChan:
+					return
+				case <-node.closeChan:
 					return
 				}
 			}
 		}(vertex)
 	}
 
+	// Second goroutine: the node's Expr::Stream() function.
+        //
+	// Note that this goroutine is blocked on the Expr::Stream() call for
+	// most of its execution, so closing either closeChan is not going to
+	// immediately terminate this goroutine. However, closing either
+	// closeChan is going to terminate the first goroutine, which is going
+	// to close the state.input channel, which is going to signal to Expr::
+	// Stream() that it should return.
 	obj.wg.Add(1)
-	go func(vertex interfaces.Expr) { // run function
+	node.wg.Add(1)
+	go func(vertex interfaces.Expr) {
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
 		obj.stateMutex.RUnlock()
 		defer obj.wg.Done()
+		defer node.wg.Done()
 		if obj.Debug {
+			node.mutex.RLock()
 			obj.SafeLogf("Running func `%s`", node)
+			node.mutex.RUnlock()
 		}
 		err := node.handle.Stream()
 		if obj.Debug {
+			node.mutex.RLock()
 			obj.SafeLogf("Exiting func `%s`", node)
+			node.mutex.RUnlock()
 		}
 		if err != nil {
-			// we closed with an error...
+			// Expr::Stream() ended with an error
+			node.mutex.RLock()
 			err := errwrap.Wrapf(err, "problem streaming func `%s`", node)
+			node.mutex.RUnlock()
 			select {
 			case obj.ag <- err: // send to aggregate channel
 
 			case <-obj.closeChan:
 				return
+			case <-node.closeChan:
+				return
 			}
 		}
 	}(vertex)
 
+	// Third goroutine: copying the output value to every output edge.
 	obj.wg.Add(1)
+	node.wg.Add(1)
 	go func(vertex interfaces.Expr) { // process function output data
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
 		obj.stateMutex.RUnlock()
 		defer obj.wg.Done()
+		defer node.wg.Done()
 		defer obj.agDone(vertex)
 		obj.graphMutex.RLock()
 		outgoing := obj.graph.OutgoingGraphVertices(vertex) // []Vertex
 		obj.graphMutex.RUnlock()
-		for value := range node.output {                    // read from channel
-			obj.tableMutex.RLock()
-			cached, exists := obj.table[vertex]
-			obj.tableMutex.RUnlock()
-			if !exists { // first value received
-				// RACE: do this AFTER value is present!
-				//node.loaded = true // not yet please
-                                node.mutex.RLock()
- 				obj.Logf("func `%s` started", node)
-                                node.mutex.RUnlock()
-			} else if value.Cmp(cached) == nil {
-				// skip if new value is same as previous
-				// if this happens often, it *might* be
-				// a bug in the function implementation
-				// FIXME: do we need to disable engine
-				// caching when using hysteresis?
-                                node.mutex.RLock()
-				obj.Logf("func `%s` skipped", node)
-                                node.mutex.RUnlock()
-				continue
-			}
-			obj.tableMutex.Lock()
-			// XXX: maybe we can get rid of the table...
-			obj.table[vertex] = value // save the latest
-			node.mutex.Lock()
-			if err := node.Expr.SetValue(value); err != nil {
-				node.mutex.Unlock() // don't block node.String()
-				panic(fmt.Sprintf("could not set value for `%s`: %+v", node, err))
-			}
-			node.loaded = true // set *after* value is in :)
-			obj.Logf("func `%s` changed", node)
-			node.mutex.Unlock()
-			obj.tableMutex.Unlock()
-
-			// FIXME: will this actually prevent glitching?
-			// if we only notify the aggregate channel when
-			// we're at the bottom of the topo sort (eg: no
-			// outgoing vertices to notify) then we'll have
-			// a glitch free subtree in the programs ast...
-			if obj.Glitch || len(outgoing) == 0 {
-				select {
-				case obj.ag <- nil: // send to aggregate channel
-
-				case <-obj.closeChan:
-					return
-				}
-			}
-
-			// notify the receiving vertices
-			for _, v := range outgoing {
-				obj.stateMutex.RLock()
-				node := obj.state[v]
-				obj.stateMutex.RUnlock()
-				select {
-				case node.notify <- struct{}{}:
-
-				case <-obj.closeChan:
-					return
-				}
-			}
-		}
-		// no more output values are coming...
-                node.mutex.RLock()
-		obj.Logf("func `%s` stopped", node)
-                node.mutex.RUnlock()
-
-		// nodes that never loaded will cause the engine to hang
-		if !node.loaded {
-			node.mutex.RLock()
-			e := fmt.Errorf("func `%s` stopped before it was loaded", node)
-			node.mutex.RUnlock()
+		for {
 			select {
-			case obj.ag <- e:
+			case value, ok := <- node.output:
+				if ok {
+					// Expr::Stream() emitted an output value.
+
+					obj.tableMutex.RLock()
+					cached, exists := obj.table[vertex]
+					obj.tableMutex.RUnlock()
+					if !exists { // first value received
+						// RACE: do this AFTER value is present!
+						//node.loaded = true // not yet please
+						node.mutex.RLock()
+						obj.Logf("func `%s` started", node)
+						node.mutex.RUnlock()
+					} else if value.Cmp(cached) == nil {
+						// skip if new value is same as previous
+						// if this happens often, it *might* be
+						// a bug in the function implementation
+						// FIXME: do we need to disable engine
+						// caching when using hysteresis?
+						node.mutex.RLock()
+						obj.Logf("func `%s` skipped", node)
+						node.mutex.RUnlock()
+						continue
+					}
+					obj.tableMutex.Lock()
+					// XXX: maybe we can get rid of the table...
+					obj.table[vertex] = value // save the latest
+					node.mutex.Lock()
+					if err := node.Expr.SetValue(value); err != nil {
+						msg := fmt.Sprintf("could not set value for `%s`: %+v", node, err)
+						node.mutex.Unlock()
+						panic(msg)
+					}
+					node.loaded = true // set *after* value is in :)
+					obj.Logf("func `%s` changed", node)
+					node.mutex.Unlock()
+					obj.tableMutex.Unlock()
+
+					// FIXME: will this actually prevent glitching?
+					// if we only notify the aggregate channel when
+					// we're at the bottom of the topo sort (eg: no
+					// outgoing vertices to notify) then we'll have
+					// a glitch free subtree in the programs ast...
+					if obj.Glitch || len(outgoing) == 0 {
+						select {
+						case obj.ag <- nil: // send to aggregate channel
+
+						case <-obj.closeChan:
+							return
+						case <-node.closeChan:
+							return
+						}
+					}
+
+					// notify the receiving vertices
+					for _, v := range outgoing {
+						obj.stateMutex.RLock()
+						node := obj.state[v]
+						obj.stateMutex.RUnlock()
+						select {
+						case node.notify <- struct{}{}:
+
+						case <-obj.closeChan:
+							return
+						case <-node.closeChan:
+							return
+						}
+					}
+				} else {
+					// Expr::Stream() will no longer emit
+					// any output values.
+
+					node.mutex.RLock()
+					obj.Logf("func `%s` stopped", node)
+					node.mutex.RUnlock()
+
+					// nodes that never loaded will cause the engine to hang
+					if !node.loaded {
+						node.mutex.RLock()
+						e := fmt.Errorf("func `%s` stopped before it was loaded", node)
+						node.mutex.RUnlock()
+						select {
+						case obj.ag <- e:
+						case <-obj.closeChan:
+							return
+						case <-node.closeChan:
+							return
+						}
+					}
+				}
+
 			case <-obj.closeChan:
+				return
+			case <-node.closeChan:
 				return
 			}
 		}
@@ -621,8 +719,14 @@ func (obj *Engine) EnableVertex(vertex interfaces.Expr) error {
 // Also terminates the associated goroutines ("disables" the vertex), and
 // removes the incoming and outgoing edges.
 func (obj *Engine) RemoveVertex(v interfaces.Expr) {
-  // TODO: stop the two goroutines
-  // TODO: edit obj.graph
+	obj.stateMutex.RLock()
+	node := obj.state[v]
+	obj.stateMutex.RUnlock()
+
+	node.closeChan <- struct{}{}
+	node.wg.Wait()
+	
+        // TODO: remove v and its edges
 }
 
 
