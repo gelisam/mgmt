@@ -1844,13 +1844,19 @@ func TestChangingFunctionGraph0(t *testing.T) {
                 }
 
                 // TODO: remove the edges and rewire the graph to compute (2 + 5) - 4 instead.
-                lit3, err := findVertexByName("int(3)")
+                lit3Vertex, err := findVertexByName("int(3)")
                 if err != nil {
                   t.Errorf("test #%d: FAIL", testIndex)
                   t.Errorf("test #%d: %s", testIndex, err.Error())
                   return
 		}
-                funcs.RemoveVertex(lit3)
+                lit3Expr, ok := lit3Vertex.(interfaces.Expr)
+                if !ok {
+                  t.Errorf("test #%d: FAIL", testIndex)
+                  t.Errorf("test #%d: expected the Vertex for int(3) to be an Expr, got %T", testIndex, lit3Vertex)
+                  return
+                }
+                funcs.RemoveVertex(lit3Expr)
 
                 // TODO: compile a single ast node for the number 5 to a single function node
                 //var lit5 interfaces.Expr

@@ -155,13 +155,18 @@ func (obj *Engine) Init(initialGraph *pgraph.Graph) error {
 
         var errors error
 	for _, vertex := range initialGraph.Vertices() {
-		e1 := obj.AddVertex(vertex)
+		expr, ok := vertex.(interfaces.Expr)
+		if !ok {
+			return fmt.Errorf("vertex (%+v) is not an Expr", vertex)
+		}
+
+		e1 := obj.AddVertex(expr)
 		e2 := errwrap.Wrapf(e1, "error loading func `%s`", vertex)
 		errors = errwrap.Append(errors, e2) // list of errors
 	}
 	for vertex1, outgoingEdges := range initialGraph.Adjacency() {
 		for vertex2, edge := range outgoingEdges {
-			e := obj.AddEdge(vertex1, vertex2, edge)
+			e := obj.AddEdge(vertex1.(interfaces.Expr), vertex2.(interfaces.Expr), edge)
 			errors = errwrap.Append(errors, e) // list of errors
 		}
 	}
@@ -324,7 +329,7 @@ func (obj *Engine) Validate() error {
 	return nil
 }
 
-func (obj *Engine) AddVertex(vertex pgraph.Vertex) error {
+func (obj *Engine) AddVertex(vertex interfaces.Expr) error {
 	// is this an interface we can use?
 
 	obj.stateMutex.RLock()
@@ -360,7 +365,7 @@ func (obj *Engine) AddVertex(vertex pgraph.Vertex) error {
 	return nil
 }
 
-func (obj *Engine) AddEdge(v1, v2 pgraph.Vertex, e pgraph.Edge) error {
+func (obj *Engine) AddEdge(v1, v2 interfaces.Expr, e pgraph.Edge) error {
 	obj.stateMutex.RLock()
         node1 := obj.state[v1]
         node2 := obj.state[v2]
@@ -393,7 +398,7 @@ func (obj *Engine) AddEdge(v1, v2 pgraph.Vertex, e pgraph.Edge) error {
 // at the end of the Engine::Run() execution, when all the nodes are removed,
 // or earlier if a function node decides to modify the function graph as a
 // side-effect.
-func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
+func (obj *Engine) EnableVertex(vertex interfaces.Expr) error {
 	obj.stateMutex.Lock()
 	node := obj.state[vertex]
         enabled := node.enabled
@@ -434,7 +439,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 	} else {
 		// process function input data
 		obj.wg.Add(1)
-		go func(vertex pgraph.Vertex) {
+		go func(vertex interfaces.Expr) {
 			obj.stateMutex.RLock()
 			node := obj.state[vertex]
 			obj.stateMutex.RUnlock()
@@ -493,7 +498,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 	}
 
 	obj.wg.Add(1)
-	go func(vertex pgraph.Vertex) { // run function
+	go func(vertex interfaces.Expr) { // run function
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
 		obj.stateMutex.RUnlock()
@@ -518,7 +523,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 	}(vertex)
 
 	obj.wg.Add(1)
-	go func(vertex pgraph.Vertex) { // process function output data
+	go func(vertex interfaces.Expr) { // process function output data
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
 		obj.stateMutex.RUnlock()
@@ -611,7 +616,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 
 // Also terminates the associated goroutines ("disables" the vertex), and
 // removes the incoming and outgoing edges.
-func (obj *Engine) RemoveVertex(v pgraph.Vertex) {
+func (obj *Engine) RemoveVertex(v interfaces.Expr) {
   // TODO: stop the two goroutines
   // TODO: edit obj.graph
 }
@@ -643,7 +648,7 @@ func (obj *Engine) Run() error {
 	// other.
 	obj.agAdd(len(topologicalSort))
 	for _, vertex := range topologicalSort {
-		err := obj.EnableVertex(vertex)
+		err := obj.EnableVertex(vertex.(interfaces.Expr))
 		if err != nil {
 			return err
 		}
@@ -730,7 +735,7 @@ func (obj *Engine) agAdd(i int) {
 }
 
 // agDone closes the channel if we're the last one using it.
-func (obj *Engine) agDone(vertex pgraph.Vertex) {
+func (obj *Engine) agDone(vertex interfaces.Expr) {
 	defer obj.agLock.Unlock()
 	obj.agLock.Lock()
 
