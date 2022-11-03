@@ -116,7 +116,6 @@ type Engine struct {
 
         graphMutex *sync.RWMutex        // concurrency guard for the graph
 	graph    *pgraph.Graph
-	topologicalSort []pgraph.Vertex // cached sorting of the graph for perf
 
 	stateMutex *sync.RWMutex       // concurrency guard for the state map
 	state map[pgraph.Vertex]*State // state associated with the vertex
@@ -153,11 +152,6 @@ func (obj *Engine) Init(initialGraph *pgraph.Graph) error {
 	if err != nil {
 		return errwrap.Wrapf(err, "NewGraph failed")
 	}
-	topologicalSort, err := initialGraph.TopologicalSort()
-	if err != nil {
-		return errwrap.Wrapf(err, "topo sort failed")
-	}
-	obj.topologicalSort = topologicalSort // cache the result
 
         var errors error
 	for _, vertex := range initialGraph.Vertices() {
@@ -330,8 +324,6 @@ func (obj *Engine) Validate() error {
 	return nil
 }
 
-// TODO: find all the places which refer to obj.graph and obj.topologicalSort,
-// to make sure they can see the changes after they happen.
 func (obj *Engine) AddVertex(vertex pgraph.Vertex) error {
 	// is this an interface we can use?
 
@@ -621,7 +613,7 @@ func (obj *Engine) EnableVertex(vertex pgraph.Vertex) error {
 // removes the incoming and outgoing edges.
 func (obj *Engine) RemoveVertex(v pgraph.Vertex) {
   // TODO: stop the two goroutines
-  // TODO: edit obj.graph (and obj.topologicalSort?)
+  // TODO: edit obj.graph
 }
 
 
@@ -629,7 +621,14 @@ func (obj *Engine) RemoveVertex(v pgraph.Vertex) {
 // startup failed for some reason. On success, use the Stream and Table methods
 // for future interaction with the engine, and the Close method to shut it off.
 func (obj *Engine) Run() error {
-	if len(obj.topologicalSort) == 0 { // no funcs to load!
+	obj.graphMutex.RLock()
+	topologicalSort, err := obj.graph.TopologicalSort()
+	obj.graphMutex.RUnlock()
+        if err != nil {
+		return err
+        }
+
+	if len(topologicalSort) == 0 { // no funcs to load!
 		close(obj.loadedChan)
 		close(obj.streamChan)
 		return nil
@@ -642,8 +641,8 @@ func (obj *Engine) Run() error {
 
 	// Enable all the funcs, causing them to start sending values to each
 	// other.
-	obj.agAdd(len(obj.topologicalSort))
-	for _, vertex := range obj.topologicalSort {
+	obj.agAdd(len(topologicalSort))
+	for _, vertex := range topologicalSort {
 		err := obj.EnableVertex(vertex)
 		if err != nil {
 			return err
@@ -668,7 +667,7 @@ func (obj *Engine) Run() error {
 				if !obj.loaded {
 					// now check if we're ready
 					var loaded = true // initially assume true
-					for _, vertex := range obj.topologicalSort {
+					for _, vertex := range topologicalSort {
 						obj.stateMutex.RLock()
 						node := obj.state[vertex]
 						obj.stateMutex.RUnlock()
@@ -806,7 +805,14 @@ func (obj *Engine) Stream() chan error {
 // Close shuts down the function engine. It waits till everything has finished.
 func (obj *Engine) Close() error {
 	var err error
-	for _, vertex := range obj.topologicalSort { // FIXME: should we do this in reverse?
+        obj.graphMutex.RLock()
+	topologicalSort, err := obj.graph.TopologicalSort()
+        obj.graphMutex.RUnlock()
+	if err != nil {
+		return err
+	}
+
+	for _, vertex := range topologicalSort { // FIXME: should we do this in reverse?
 		obj.stateMutex.RLock()
 		node := obj.state[vertex]
 		obj.stateMutex.RUnlock()
