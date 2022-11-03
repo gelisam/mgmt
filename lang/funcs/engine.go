@@ -726,7 +726,11 @@ func (obj *Engine) RemoveVertex(v interfaces.Expr) {
 	node.closeChan <- struct{}{}
 	node.wg.Wait()
 	
-        // TODO: remove v and its edges
+        obj.graphMutex.Lock()
+        obj.graph.DeleteVertex(v)
+        obj.graphMutex.Unlock()
+
+        // TODO: cause the upstream and downstream goroutines to refresh their edges
 }
 
 
