@@ -487,7 +487,11 @@ func (obj *Engine) EnableVertex(vertex interfaces.Expr) error {
 			var ready  bool
 			for {
 				select {
-				case <- node.notify:
+				case _, ok := <- node.notify:
+					if !ok {
+						return
+					}
+
 					// New input values are available, but
 					// we aren't ready to forward those
 					// inputs to the node until we have a
@@ -703,6 +707,8 @@ func (obj *Engine) EnableVertex(vertex interfaces.Expr) error {
 							return
 						}
 					}
+
+                                        return
 				}
 
 			case <-obj.closeChan:
