@@ -1866,9 +1866,12 @@ func TestChangingFunctionGraph0(t *testing.T) {
 		//v4, v5, v6 := vtex("int(42)"), vtex("int(13)"), vtex("int(99)")
 		//v7 := vtex(fmt.Sprintf(`call:%s(str("+"), int(42), int(13))`, funcs.OperatorFuncName))
 		//v8 := vtex(fmt.Sprintf(`call:%s(str("-"), call:%s(str("+"), int(42), int(13)), int(99))`, funcs.OperatorFuncName, funcs.OperatorFuncName))
+                
+                // TODO: James suggest: funcs.Lock()
                 //funcs.AddVertex(lit5)
                 //funcs.AddEdge(lit5, plus)
-                //funcs.EnableVertex(lit5)
+                // TODO: James suggest: funcs.Unlock()
+                //funcs.EnableVertex(lit5)  // James suggest: delete this line
 
 		// TODO wait for r to change
 
