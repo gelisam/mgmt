@@ -1277,14 +1277,14 @@ func (obj *FuncValue) Call(args []pgraph.Vertex) (pgraph.Vertex, error) {
 	return result, err
 }
 
-// SimpleFunc represents a function which takes a list of Value arguments and
+// SimpleFn represents a function which takes a list of Value arguments and
 // returns a Value. It can also return an error which could represent that
 // something went horribly wrong. (Think, an internal panic.)
 // This is not general enough to represent all functions in the language (see
 // FuncValue above), but it is a useful common case.
-// SimpleFunc is not a Value, but it is a useful building block for
-// implementing Func nodes.
-type SimpleFunc struct {
+// SimpleFn is not a Value, but it is a useful building block for implementing
+// Func nodes.
+type SimpleFn struct {
 	V func([]Value) (Value, error)
 	T *Type // contains ordered field types, arg names are a bonus part
 }
@@ -1292,7 +1292,7 @@ type SimpleFunc struct {
 // Call runs the function value and returns its result. It returns an error if
 // something goes wrong during execution, and panic's if you call this with
 // inappropriate input types, or if it returns an inappropriate output type.
-func (obj *SimpleFunc) Call(args []Value) (Value, error) {
+func (obj *SimpleFn) Call(args []Value) (Value, error) {
        // cmp input args type to obj.T
        length := len(obj.T.Ord)
        if length != len(args) {
@@ -1318,7 +1318,7 @@ func (obj *SimpleFunc) Call(args []Value) (Value, error) {
        return result, err
 }
 
-func (obj *SimpleFunc) Type() *Type { return obj.T }
+func (obj *SimpleFn) Type() *Type { return obj.T }
 
 // VariantValue represents a variant value.
 type VariantValue struct {
