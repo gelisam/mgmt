@@ -202,36 +202,37 @@ func ValueOf(v reflect.Value) (Value, error) {
 		}, nil
 
 	case reflect.Func:
-		t, err := TypeOf(value.Type())
-		if err != nil {
-			return nil, errwrap.Wrapf(err, "can't determine type of %+v", value)
-		}
-		if t.Out == nil {
-			return nil, fmt.Errorf("cannot only represent functions with one output value")
-		}
+		return nil, fmt.Errorf("TODO: convert a golang function of type (Value, Value) -> Value to a FuncValue")
+		//t, err := TypeOf(value.Type())
+		//if err != nil {
+		//	return nil, errwrap.Wrapf(err, "can't determine type of %+v", value)
+		//}
+		//if t.Out == nil {
+		//	return nil, fmt.Errorf("cannot only represent functions with one output value")
+		//}
 
-		f := func(args []Value) (Value, error) {
-			in := []reflect.Value{}
-			for _, x := range args {
-				// TODO: should we build this method instead?
-				//v := x.Reflect() // types.Value -> reflect.Value
-				v := reflect.ValueOf(x.Value())
-				in = append(in, v)
-			}
+		//f := func(args []Value) (Value, error) {
+		//	in := []reflect.Value{}
+		//	for _, x := range args {
+		//		// TODO: should we build this method instead?
+		//		//v := x.Reflect() // types.Value -> reflect.Value
+		//		v := reflect.ValueOf(x.Value())
+		//		in = append(in, v)
+		//	}
 
-			// FIXME: can we trap panic's ?
-			out := value.Call(in) // []reflect.Value
-			if len(out) != 1 {    // TODO: panic, b/c already checked in TypeOf?
-				return nil, fmt.Errorf("cannot only represent functions with one output value")
-			}
+		//	// FIXME: can we trap panic's ?
+		//	out := value.Call(in) // []reflect.Value
+		//	if len(out) != 1 {    // TODO: panic, b/c already checked in TypeOf?
+		//		return nil, fmt.Errorf("cannot only represent functions with one output value")
+		//	}
 
-			return ValueOf(out[0]) // recurse
-		}
+		//	return ValueOf(out[0]) // recurse
+		//}
 
-		return &FuncValue{
-			T: t,
-			V: f,
-		}, nil
+		//return &FuncValue{
+		//	T: t,
+		//	V: f,
+		//}, nil
 
 	default:
 		return nil, fmt.Errorf("unable to represent value of %+v", v)
@@ -404,38 +405,39 @@ func Into(v Value, rv reflect.Value) error {
 		return nil
 
 	case *FuncValue:
-		if err := mustInto(reflect.Func); err != nil {
-			return err
-		}
+		return fmt.Errorf("TODO: what is this supposed to do?")
+		//if err := mustInto(reflect.Func); err != nil {
+		//	return err
+		//}
 
-		// wrap our function with the translation that is necessary
-		fn := func(args []reflect.Value) (results []reflect.Value) { // build
-			innerArgs := []Value{}
-			for _, x := range args {
-				v, err := ValueOf(x) // reflect.Value -> Value
-				if err != nil {
-					panic(fmt.Errorf("can't determine value of %+v", x))
-				}
-				innerArgs = append(innerArgs, v)
-			}
-			result, err := v.V(innerArgs) // call it
-			if err != nil {
-				// when calling our function with the Call method, then
-				// we get the error output and have a chance to decide
-				// what to do with it, but when calling it from within
-				// a normal golang function call, the error represents
-				// that something went horribly wrong, aka a panic...
-				panic(fmt.Errorf("function panic: %+v", err))
-			}
-			out := reflect.New(rv.Type().Out(0))
-			// convert the lang result back to a Go value
-			if err := Into(result, out); err != nil {
-				panic(fmt.Errorf("function return conversion panic: %+v", err))
-			}
-			return []reflect.Value{out} // only one result
-		}
-		rv.Set(reflect.MakeFunc(rv.Type(), fn))
-		return nil
+		//// wrap our function with the translation that is necessary
+		//fn := func(args []reflect.Value) (results []reflect.Value) { // build
+		//	innerArgs := []Value{}
+		//	for _, x := range args {
+		//		v, err := ValueOf(x) // reflect.Value -> Value
+		//		if err != nil {
+		//			panic(fmt.Errorf("can't determine value of %+v", x))
+		//		}
+		//		innerArgs = append(innerArgs, v)
+		//	}
+		//	result, err := v.V(innerArgs) // call it
+		//	if err != nil {
+		//		// when calling our function with the Call method, then
+		//		// we get the error output and have a chance to decide
+		//		// what to do with it, but when calling it from within
+		//		// a normal golang function call, the error represents
+		//		// that something went horribly wrong, aka a panic...
+		//		panic(fmt.Errorf("function panic: %+v", err))
+		//	}
+		//	out := reflect.New(rv.Type().Out(0))
+		//	// convert the lang result back to a Go value
+		//	if err := Into(result, out); err != nil {
+		//		panic(fmt.Errorf("function return conversion panic: %+v", err))
+		//	}
+		//	return []reflect.Value{out} // only one result
+		//}
+		//rv.Set(reflect.MakeFunc(rv.Type(), fn))
+		//return nil
 
 	case *VariantValue:
 		return Into(v.V, rv)
@@ -1198,31 +1200,32 @@ func (obj *FuncValue) Copy() Value {
 
 // Value returns the raw value of this type.
 func (obj *FuncValue) Value() interface{} {
-	typ := obj.T.Reflect()
+	panic(fmt.Sprintf("TODO: figure out what this is for"))
+	//typ := obj.T.Reflect()
 
-	// wrap our function with the translation that is necessary
-	fn := func(args []reflect.Value) (results []reflect.Value) { // build
-		innerArgs := []Value{}
-		for _, x := range args {
-			v, err := ValueOf(x) // reflect.Value -> Value
-			if err != nil {
-				panic(fmt.Sprintf("can't determine value of %+v", x))
-			}
-			innerArgs = append(innerArgs, v)
-		}
-		result, err := obj.V(innerArgs) // call it
-		if err != nil {
-			// when calling our function with the Call method, then
-			// we get the error output and have a chance to decide
-			// what to do with it, but when calling it from within
-			// a normal golang function call, the error represents
-			// that something went horribly wrong, aka a panic...
-			panic(fmt.Sprintf("function panic: %+v", err))
-		}
-		return []reflect.Value{reflect.ValueOf(result.Value())} // only one result
-	}
-	val := reflect.MakeFunc(typ, fn)
-	return val.Interface()
+	//// wrap our function with the translation that is necessary
+	//fn := func(args []reflect.Value) (results []reflect.Value) { // build
+	//	innerArgs := []Value{}
+	//	for _, x := range args {
+	//		v, err := ValueOf(x) // reflect.Value -> Value
+	//		if err != nil {
+	//			panic(fmt.Sprintf("can't determine value of %+v", x))
+	//		}
+	//		innerArgs = append(innerArgs, v)
+	//	}
+	//	result, err := obj.V(innerArgs) // call it
+	//	if err != nil {
+	//		// when calling our function with the Call method, then
+	//		// we get the error output and have a chance to decide
+	//		// what to do with it, but when calling it from within
+	//		// a normal golang function call, the error represents
+	//		// that something went horribly wrong, aka a panic...
+	//		panic(fmt.Sprintf("function panic: %+v", err))
+	//	}
+	//	return []reflect.Value{reflect.ValueOf(result.Value())} // only one result
+	//}
+	//val := reflect.MakeFunc(typ, fn)
+	//return val.Interface()
 }
 
 // Func represents the value of this type as a function if it is one. If this is
@@ -1248,11 +1251,14 @@ func (obj *FuncValue) Call(args []pgraph.Vertex) (pgraph.Vertex, error) {
 	if length != len(args) {
 		return nil, fmt.Errorf("arg length of %d does not match expected of %d", len(args), length)
 	}
-	for i := 0; i < length; i++ {
-		if err := args[i].Type().Cmp(obj.T.Map[obj.T.Ord[i]]); err != nil {
-			return nil, errwrap.Wrapf(err, "cannot cmp input types")
-		}
-	}
+	// TODO: each arg should be a Func, with a Sig giving a partial
+	//       signature. check that their output types, if known, are
+	//       compatible with the arguments of the function type "obj.T".
+	//for i := 0; i < length; i++ {
+	//	if err := args[i].Type().Cmp(obj.T.Map[obj.T.Ord[i]]); err != nil {
+	//		return nil, errwrap.Wrapf(err, "cannot cmp input types")
+	//	}
+	//}
 
 	result, err := obj.V(args) // call it
 	if result == nil {
@@ -1261,9 +1267,12 @@ func (obj *FuncValue) Call(args []pgraph.Vertex) (pgraph.Vertex, error) {
 		}
 		return nil, errwrap.Wrapf(err, "function returned nil result during error")
 	}
-	if err := result.Type().Cmp(obj.T.Out); err != nil {
-		return nil, errwrap.Wrapf(err, "cannot cmp return types")
-	}
+	// TODO: the result should be a Func, with a Sig giving a partial
+	//       signature. check that its output type, if known, is compatible
+	//       with the result type of the function type "obj.T".
+	//if err := result.Type().Cmp(obj.T.Out); err != nil {
+	//	return nil, errwrap.Wrapf(err, "cannot cmp return types")
+	//}
 
 	return result, err
 }
