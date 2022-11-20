@@ -41,7 +41,7 @@ To implement a function, you'll need to create a file that imports the
 [`lang/funcs/simple/`](https://github.com/purpleidea/mgmt/tree/master/lang/funcs/simple/)
 module. It should probably get created in the correct directory inside of:
 [`lang/funcs/core/`](https://github.com/purpleidea/mgmt/tree/master/lang/funcs/core/).
-The function should be implemented as a `FuncValue` in our type system. It is
+The function should be implemented as a `SimpleFn` in our type system. It is
 then registered with the engine during `init()`. An example explains it best:
 
 ### Example
@@ -59,7 +59,7 @@ import (
 // you must register your functions in init when the program starts up
 func init() {
 	// Example function that squares an int and prints out answer as an str.
-	simple.ModuleRegister(ModuleName, "talkingsquare", &types.FuncValue{
+	simple.ModuleRegister(ModuleName, "talkingsquare", &types.SimpleFn{
 		T: types.NewType("func(int) str"), // declare the signature
 		V: func(input []types.Value) (types.Value, error) {
 			i := input[0].Int() // get first arg as an int64
@@ -116,7 +116,7 @@ To implement a function, you'll need to create a file that imports the
 [`lang/funcs/simplepoly/`](https://github.com/purpleidea/mgmt/tree/master/lang/funcs/simplepoly/)
 module. It should probably get created in the correct directory inside of:
 [`lang/funcs/core/`](https://github.com/purpleidea/mgmt/tree/master/lang/funcs/core/).
-The function should be implemented as a list of `FuncValue`'s in our type
+The function should be implemented as a list of `SimpleFn`'s in our type
 system. It is then registered with the engine during `init()`. You may also use
 the `variant` type in your type definitions. This special type will never be
 seen inside a running program, and will get converted to a concrete type if a
@@ -142,7 +142,7 @@ import (
 func init() {
 	// You may use the simplepoly.ModuleRegister method to register your
 	// function if it's in a module, as seen in the simple function example.
-	simplepoly.Register("len", []*types.FuncValue{
+	simplepoly.Register("len", []*types.SimpleFn{
 		{
 			T: types.NewType("func([]variant) int"),
 			V: Len,
@@ -424,12 +424,12 @@ will likely require a language that can expose a C-like API, such as `python` or
 There are still many ideas for new functions that haven't been written yet. If
 you'd like to contribute one, please contact us and tell us about your idea!
 
-### Can I generate many different `FuncValue` implementations from one function?
+### Can I generate many different `SimpleFn` implementations from one function?
 
 Yes, you can use a function generator in `golang` to build multiple different
 implementations from the same function generator. You just need to implement a
 function which *returns* a `golang` type of `func([]types.Value) (types.Value, error)`
-which is what `FuncValue` expects. The generator function can use any input it
+which is what `SimpleFn` expects. The generator function can use any input it
 wants to build the individual functions, thus helping with code re-use.
 
 ### How do I determine the signature of my simple, polymorphic function?
@@ -441,7 +441,7 @@ element can be ascertained with the `Type()` method available on every value.
 
 Knowing the output type is trickier. If it can not be inferred in some manner,
 then the only way is to keep track of this yourself. You can use a function
-generator to build your `FuncValue` implementations, and pass in the unique
+generator to build your `SimpleFn` implementations, and pass in the unique
 signature to each one as you are building them. Using a generator is a common
 technique which was mentioned previously.
 
