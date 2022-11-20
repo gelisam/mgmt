@@ -1320,6 +1320,14 @@ func (obj *SimpleFn) Call(args []Value) (Value, error) {
 
 func (obj *SimpleFn) Type() *Type { return obj.T }
 
+// Copy returns a copy of this value.
+func (obj *SimpleFn) Copy() *SimpleFn {
+	return &SimpleFn{
+		V: obj.V,
+		T: obj.T.Copy(),
+	}
+}
+
 // VariantValue represents a variant value.
 type VariantValue struct {
 	base
