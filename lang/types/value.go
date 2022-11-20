@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/purpleidea/mgmt/pgraph"
 	"github.com/purpleidea/mgmt/util/errwrap"
 )
 
@@ -54,7 +55,7 @@ type Value interface {
 	List() []Value
 	Map() map[Value]Value // keys must all have same type, same for values
 	Struct() map[string]Value
-	Func() func([]Value) (Value, error)
+	Func() func([]pgraph.Vertex) (pgraph.Vertex, error)
 }
 
 // ValueOfGolang is a helper that takes a golang value, and produces the mcl
@@ -498,7 +499,7 @@ func (obj *base) Struct() map[string]Value {
 
 // Func represents the value of this type as a function if it is one. If this is
 // not a function, then this panics.
-func (obj *base) Func() func([]Value) (Value, error) {
+func (obj *base) Func() func([]pgraph.Vertex) (pgraph.Vertex, error) {
 	panic("not a func")
 }
 
@@ -1128,12 +1129,21 @@ func (obj *StructValue) Lookup(k string) (value Value, exists bool) {
 	return v, exists
 }
 
-// FuncValue represents a function value. The defined function takes a list of
-// Value arguments and returns a Value. It can also return an error which could
-// represent that something went horribly wrong. (Think, an internal panic.)
+// FuncValue represents a function value, for example a builtin or a lambda.
+// In most languages, we can simply call a function with a list of arguments
+// and expect to receive a single value. In this language, however, a function
+// might be something like datetime.now() or fn(n) {shell(Sprintf("seq %d", n))},
+// which might not produce a value immediately, and might then produce multiple
+// values over time. Thus, in this language, a FuncValue does not receive
+// Values, instead it receives input Func nodes. The FuncValue then adds more
+// Func nodes and edges in order to arrange for output values to be sent to a
+// particular output node, which the function returns so that the caller may
+// connect that output node to more nodes down the line.
+// The function can also return an error which could represent that something
+// went horribly wrong. (Think, an internal panic.)
 type FuncValue struct {
 	base
-	V func([]Value) (Value, error)
+	V func([]pgraph.Vertex) (pgraph.Vertex, error)
 	T *Type // contains ordered field types, arg names are a bonus part
 }
 
@@ -1142,7 +1152,7 @@ func NewFunc(t *Type) *FuncValue {
 	if t.Kind != KindFunc {
 		return nil // sanity check
 	}
-	v := func([]Value) (Value, error) {
+	v := func([]pgraph.Vertex) (pgraph.Vertex, error) {
 		return nil, fmt.Errorf("nil function") // TODO: is this correct?
 	}
 	return &FuncValue{
@@ -1217,20 +1227,22 @@ func (obj *FuncValue) Value() interface{} {
 
 // Func represents the value of this type as a function if it is one. If this is
 // not a function, then this panics.
-func (obj *FuncValue) Func() func([]Value) (Value, error) {
+func (obj *FuncValue) Func() func([]pgraph.Vertex) (pgraph.Vertex, error) {
 	return obj.V
 }
 
 // Set sets the function value to be a new function.
-func (obj *FuncValue) Set(fn func([]Value) (Value, error)) error { // TODO: change method name?
+func (obj *FuncValue) Set(fn func([]pgraph.Vertex) (pgraph.Vertex, error)) error { // TODO: change method name?
 	obj.V = fn
 	return nil // TODO: can we do any sort of checking here?
 }
 
-// Call runs the function value and returns its result. It returns an error if
-// something goes wrong during execution, and panic's if you call this with
+// Call runs the function value, thus causing the Func graph to be modified,
+// and then returns the output node. It returns an error if...
+// TODO: is the below still true?
+// ...something goes wrong during execution, and panic's if you call this with
 // inappropriate input types, or if it returns an inappropriate output type.
-func (obj *FuncValue) Call(args []Value) (Value, error) {
+func (obj *FuncValue) Call(args []pgraph.Vertex) (pgraph.Vertex, error) {
 	// cmp input args type to obj.T
 	length := len(obj.T.Ord)
 	if length != len(args) {
@@ -1255,6 +1267,49 @@ func (obj *FuncValue) Call(args []Value) (Value, error) {
 
 	return result, err
 }
+
+// SimpleFunc represents a function which takes a list of Value arguments and
+// returns a Value. It can also return an error which could represent that
+// something went horribly wrong. (Think, an internal panic.)
+// This is not general enough to represent all functions in the language (see
+// FuncValue above), but it is a useful common case.
+// SimpleFunc is not a Value, but it is a useful building block for
+// implementing Func nodes.
+type SimpleFunc struct {
+	V func([]Value) (Value, error)
+	T *Type // contains ordered field types, arg names are a bonus part
+}
+
+// Call runs the function value and returns its result. It returns an error if
+// something goes wrong during execution, and panic's if you call this with
+// inappropriate input types, or if it returns an inappropriate output type.
+func (obj *SimpleFunc) Call(args []Value) (Value, error) {
+       // cmp input args type to obj.T
+       length := len(obj.T.Ord)
+       if length != len(args) {
+               return nil, fmt.Errorf("arg length of %d does not match expected of %d", len(args), length)
+       }
+       for i := 0; i < length; i++ {
+               if err := args[i].Type().Cmp(obj.T.Map[obj.T.Ord[i]]); err != nil {
+                       return nil, errwrap.Wrapf(err, "cannot cmp input types")
+               }
+       }
+
+       result, err := obj.V(args) // call it
+       if result == nil {
+		if err == nil {
+			return nil, fmt.Errorf("function returned nil result")
+		}
+		return nil, errwrap.Wrapf(err, "function returned nil result during error")
+	}
+       if err := result.Type().Cmp(obj.T.Out); err != nil {
+               return nil, errwrap.Wrapf(err, "cannot cmp return types")
+       }
+
+       return result, err
+}
+
+func (obj *SimpleFunc) Type() *Type { return obj.T }
 
 // VariantValue represents a variant value.
 type VariantValue struct {
@@ -1377,6 +1432,6 @@ func (obj *VariantValue) Struct() map[string]Value {
 
 // Func represents the value of this type as a function if it is one. If this is
 // not a function, then this panics.
-func (obj *VariantValue) Func() func([]Value) (Value, error) {
+func (obj *VariantValue) Func() func([]pgraph.Vertex) (pgraph.Vertex, error) {
 	return obj.V.Func()
 }
