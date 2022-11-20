@@ -22,25 +22,26 @@ import (
 
 	"github.com/purpleidea/mgmt/lang/interfaces"
 	"github.com/purpleidea/mgmt/lang/types"
+	"github.com/purpleidea/mgmt/pgraph"
 	"github.com/purpleidea/mgmt/util/errwrap"
 )
 
-// CallFunc is a function that takes in a function and all the args, and passes
-// through the results of running the function call.
+// CallFunc implements function calls by rewriting the graph to match the
+// FuncValues it receives. The arguments to the function come from a fixed set
+// of nodes, received at construction time, as does the node to which the
+// outputs of the function will be send. No output values are emitted, this
+// node is only included in the graph for its graph-rewriting side-effects.
 type CallFunc struct {
 	Type     *types.Type // this is the type of the var's value that we hold
 	FuncType *types.Type
-	Edge     string // name of the edge used (typically starts with: `call:`)
-	//Func interfaces.Func // this isn't actually used in the Stream :/
-	//Fn *types.FuncValue // pass in the actual function instead of Edge
+	FnEdge   string // name of the only input edge, the FuncValue (typically starts with: `call:`)
+	Args     []pgraph.Vertex
 
-	// Indexed specifies that args are accessed by index instead of name.
-	// This is currently unused.
-	Indexed bool
+	OutEdge  string // name of the edge into Output
+	Output   pgraph.Vertex
 
 	init   *interfaces.Init
-	last   types.Value // last value received to use for diff
-	result types.Value // last calculated output
+	last   *types.FuncValue // last value received to use for diff
 
 	closeChan chan struct{}
 }
@@ -54,7 +55,7 @@ func (obj *CallFunc) Validate() error {
 		return fmt.Errorf("must specify a func type")
 	}
 	// TODO: maybe we can remove this if we use this for core functions...
-	if obj.Edge == "" {
+	if obj.FnEdge == "" {
 		return fmt.Errorf("must specify an edge name")
 	}
 	typ := obj.FuncType
@@ -78,9 +79,9 @@ func (obj *CallFunc) Info() *interfaces.Info {
 		}
 
 		sig := obj.FuncType
-		if obj.Edge != "" {
-			typ.Map[obj.Edge] = sig // we get a function in
-			typ.Ord = append(typ.Ord, obj.Edge)
+		if obj.FnEdge != "" {
+			typ.Map[obj.FnEdge] = sig // we get a function in
+			typ.Ord = append(typ.Ord, obj.FnEdge)
 		}
 
 		// add any incoming args
@@ -116,57 +117,31 @@ func (obj *CallFunc) Stream() error {
 			if !ok {
 				return nil // can't output any more
 			}
-			//if err := input.Type().Cmp(obj.Info().Sig.Input); err != nil {
-			//	return errwrap.Wrapf(err, "wrong function input")
-			//}
-			if obj.last != nil && input.Cmp(obj.last) == nil {
-				continue // value didn't change, skip it
-			}
-			obj.last = input // store for next
-
 			st := input.(*types.StructValue) // must be!
 
 			// get the function
-			fn, exists := st.Lookup(obj.Edge)
+			fnValue, exists := st.Lookup(obj.FnEdge)
 			if !exists {
-				return fmt.Errorf("missing expected input argument `%s`", obj.Edge)
+				return fmt.Errorf("missing expected input argument `%s`", obj.FnEdge)
 			}
 
-			// get the arguments to call the function
-			args := []types.Value{}
-			typ := obj.FuncType
-			for ix, key := range typ.Ord { // sig!
-				if obj.Indexed {
-					key = fmt.Sprintf("%d", ix)
-				}
-				value, exists := st.Lookup(key)
-				// TODO: replace with:
-				//value, exists := st.Lookup(fmt.Sprintf("arg:%s", key))
-				if !exists {
-					return fmt.Errorf("missing expected input argument `%s`", key)
-				}
-				args = append(args, value)
+			fn := fnValue.(*types.FuncValue)
+			if fn != obj.last {
+				continue // value didn't change, skip it
 			}
+			obj.last = fn // store for next
 
-			// actually call it
-			result, err := fn.(*types.FuncValue).Call(args)
+			outputNode, err := fn.Call(obj.Args)
 			if err != nil {
-				return errwrap.Wrapf(err, "error calling function")
+				return err
+			}
+			
+                        outEdge := &pgraph.SimpleEdge{Name: obj.OutEdge}
+			obj.init.Txn.AddEdge(outputNode, obj.Output, outEdge)
+                        if err := obj.init.Txn.Commit(); err != nil {
+				return err
 			}
 
-			// skip sending an update...
-			if obj.result != nil && result.Cmp(obj.result) == nil {
-				continue // result didn't change
-			}
-			obj.result = result // store new result
-
-		case <-obj.closeChan:
-			return nil
-		}
-
-		select {
-		case obj.init.Output <- obj.result: // send
-			// pass
 		case <-obj.closeChan:
 			return nil
 		}
