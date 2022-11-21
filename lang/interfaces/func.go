@@ -72,12 +72,6 @@ type Func interface {
 	Init(*Init) error
 	Stream() error
 	Close() error
-
-	// SetValue stores the last value emitted by Stream()
-	SetValue(types.Value) error
-
-	// Value returns the last value emitted by Stream()
-	Value() (types.Value, error)
 }
 
 // PolyFunc is an interface for functions which are statically polymorphic. In
