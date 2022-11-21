@@ -73,11 +73,10 @@ type Func interface {
 	Stream() error
 	Close() error
 
-	// SetValue stores the result of the last computation of this expression
-	// node.
+	// SetValue stores the last value emitted by Stream()
 	SetValue(types.Value) error
 
-	// Value returns the value of this expression in our type system.
+	// Value returns the last value emitted by Stream()
 	Value() (types.Value, error)
 }
 

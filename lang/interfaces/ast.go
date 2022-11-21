@@ -124,6 +124,9 @@ type Expr interface {
 
 	// Func returns a function that represents this reactively.
 	Func() (Func, error)
+
+	// Value returns the value of this expression in our type system.
+	Value() (types.Value, error)
 }
 
 // Data provides some data to the node that could be useful during its lifetime.
