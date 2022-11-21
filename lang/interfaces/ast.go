@@ -32,8 +32,7 @@ import (
 // methods that they must both implement. In practice it is not used especially
 // often since we usually know which kind of node we want.
 type Node interface {
-	//fmt.Stringer // already provided by pgraph.Vertex
-	pgraph.Vertex // must implement this since we store these in our graphs
+	fmt.Stringer // already provided by pgraph.Vertex
 
 	// Apply is a general purpose iterator method that operates on any node.
 	Apply(fn func(Node) error) error
@@ -125,13 +124,6 @@ type Expr interface {
 
 	// Func returns a function that represents this reactively.
 	Func() (Func, error)
-
-	// SetValue stores the result of the last computation of this expression
-	// node.
-	SetValue(types.Value) error
-
-	// Value returns the value of this expression in our type system.
-	Value() (types.Value, error)
 }
 
 // Data provides some data to the node that could be useful during its lifetime.

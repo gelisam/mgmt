@@ -31,9 +31,7 @@ import (
 // State represents the state of a function vertex. This corresponds to an AST
 // expr, which is the memory address (pointer) in the graph.
 type State struct {
-	Expr interfaces.Expr // pointer to the expr vertex
-
-	handle interfaces.Func // the function (if not nil, we've found it on init)
+	Func interfaces.Func // the function
 
 	init   bool // have we run Init on our func?
 	ready  bool // has it received all the args it needs at least once?
@@ -50,16 +48,11 @@ type State struct {
 
 // Init creates the function state if it can be found in the registered list.
 func (obj *State) Init() error {
-	handle, err := obj.Expr.Func() // build one and store it, don't re-gen
-	if err != nil {
-		return err
-	}
-	if err := handle.Validate(); err != nil {
+	if err := obj.Func.Validate(); err != nil {
 		return errwrap.Wrapf(err, "could not validate func")
 	}
-	obj.handle = handle
 
-	sig := obj.handle.Info().Sig
+	sig := obj.Func.Info().Sig
 	if sig.Kind != types.KindFunc {
 		return fmt.Errorf("must be kind func")
 	}
@@ -82,7 +75,7 @@ func (obj *State) String() string {
 	//obj.mutex.RLock() // prevent race detector issues against SetValue
 	//defer obj.mutex.RUnlock()
 	// FIXME: also add read locks on any of the children Expr in obj.Expr
-	return obj.Expr.String()
+	return obj.Func.String()
 }
 
 // Engine represents the running time varying directed acyclic function graph.
@@ -143,16 +136,16 @@ func (obj *Engine) Init() error {
 			return fmt.Errorf("vertex (%+v) is not unique in the graph", vertex)
 		}
 
-		expr, ok := vertex.(interfaces.Expr)
+		fn, ok := vertex.(interfaces.Func)
 		if !ok {
-			return fmt.Errorf("vertex (%+v) was not an expr", vertex)
+			return fmt.Errorf("vertex (%+v) was not a Func", vertex)
 		}
 
 		if obj.Debug {
 			obj.Logf("Loading func `%s`", vertex)
 		}
 
-		obj.state[vertex] = &State{Expr: expr} // store some state!
+		obj.state[vertex] = &State{Func: fn} // store some state!
 
 		e1 := obj.state[vertex].Init()
 		e2 := errwrap.Wrapf(e1, "error loading func `%s`", vertex)
@@ -186,11 +179,11 @@ func (obj *Engine) Validate() error {
 		node := obj.state[vertex]
 		// TODO: this doesn't work for facts because they're in the Func
 		// duplicate pointers would get closed twice, causing a panic...
-		if inList(node.handle, ptrs) { // check for duplicate ptrs!
+		if inList(node.Func, ptrs) { // check for duplicate ptrs!
 			e := fmt.Errorf("vertex `%s` has duplicate ptr", vertex)
 			err = errwrap.Append(err, e)
 		}
-		ptrs = append(ptrs, node.handle)
+		ptrs = append(ptrs, node.Func)
 	}
 	for _, edge := range obj.Graph.Edges() {
 		if _, ok := edge.(*interfaces.FuncEdge); !ok {
@@ -205,11 +198,11 @@ func (obj *Engine) Validate() error {
 	// check if vertices expecting inputs have them
 	for vertex, count := range obj.Graph.InDegree() {
 		node := obj.state[vertex]
-		if exp := len(node.handle.Info().Sig.Ord); exp != count {
+		if exp := len(node.Func.Info().Sig.Ord); exp != count {
 			e := fmt.Errorf("expected %d inputs to `%s`, got %d", exp, node, count)
 			if obj.Debug {
 				obj.Logf("expected %d inputs to `%s`, got %d", exp, node, count)
-				obj.Logf("expected: %+v for `%s`", node.handle.Info().Sig.Ord, node)
+				obj.Logf("expected: %+v for `%s`", node.Func.Info().Sig.Ord, node)
 			}
 			err = errwrap.Append(err, e)
 		}
@@ -221,14 +214,14 @@ func (obj *Engine) Validate() error {
 		// check for outputs that don't go anywhere?
 		//node1 := obj.state[vertex1]
 		//if len(obj.Graph.Adjacency()[vertex1]) == 0 { // no vertex1 -> vertex2
-		//	if node1.handle.Info().Sig.Output != nil {
+		//	if node1.Func.Info().Sig.Output != nil {
 		//		// an output value goes nowhere...
 		//	}
 		//}
 		for vertex2 := range obj.Graph.Adjacency()[vertex1] { // populate
 			node2 := obj.state[vertex2]
 			expected[node2] = make(map[string]int)
-			for _, key := range node2.handle.Info().Sig.Ord {
+			for _, key := range node2.Func.Info().Sig.Ord {
 				expected[node2][key] = 1
 			}
 		}
@@ -242,7 +235,7 @@ func (obj *Engine) Validate() error {
 			// check vertex1 -> vertex2 (with e) is valid
 
 			for _, arg := range edge.Args { // loop over each arg
-				sig := node2.handle.Info().Sig
+				sig := node2.Func.Info().Sig
 				if len(sig.Ord) == 0 {
 					e := fmt.Errorf("no input expected from `%s` to `%s` with arg `%s`", node1, node2, arg)
 					err = errwrap.Append(err, e)
@@ -258,7 +251,7 @@ func (obj *Engine) Validate() error {
 				}
 				expected[node2][arg]-- // subtract one use
 
-				out := node1.handle.Info().Sig.Out
+				out := node1.Func.Info().Sig.Out
 				if out == nil {
 					e := fmt.Errorf("no output possible from `%s` to `%s` with arg `%s`", node1, node2, arg)
 					err = errwrap.Append(err, e)
@@ -337,7 +330,7 @@ func (obj *Engine) Run() error {
 				obj.Logf("func: "+format, v...)
 			},
 		}
-		if err := node.handle.Init(init); err != nil {
+		if err := node.Func.Init(init); err != nil {
 			return errwrap.Wrapf(err, "could not init func `%s`", node)
 		}
 		node.init = true // we've successfully initialized
@@ -361,8 +354,8 @@ func (obj *Engine) Run() error {
 					si := &types.Type{
 						// input to functions are structs
 						Kind: types.KindStruct,
-						Map:  node.handle.Info().Sig.Map,
-						Ord:  node.handle.Info().Sig.Ord,
+						Map:  node.Func.Info().Sig.Map,
+						Ord:  node.Func.Info().Sig.Ord,
 					}
 					st := types.NewStruct(si)
 					for _, v := range incoming {
@@ -407,7 +400,7 @@ func (obj *Engine) Run() error {
 			if obj.Debug {
 				obj.SafeLogf("Running func `%s`", node)
 			}
-			err := node.handle.Stream()
+			err := node.Func.Stream()
 			if obj.Debug {
 				obj.SafeLogf("Exiting func `%s`", node)
 			}
@@ -450,7 +443,7 @@ func (obj *Engine) Run() error {
 				// XXX: maybe we can get rid of the table...
 				obj.table[vertex] = value // save the latest
 				node.mutex.Lock()
-				if err := node.Expr.SetValue(value); err != nil {
+				if err := node.Func.SetValue(value); err != nil {
 					node.mutex.Unlock() // don't block node.String()
 					panic(fmt.Sprintf("could not set value for `%s`: %+v", node, err))
 				}
@@ -642,7 +635,7 @@ func (obj *Engine) Close() error {
 	for _, vertex := range obj.topologicalSort { // FIXME: should we do this in reverse?
 		node := obj.state[vertex]
 		if node.init { // did we Init this func?
-			if e := node.handle.Close(); e != nil {
+			if e := node.Func.Close(); e != nil {
 				e := errwrap.Wrapf(e, "problem closing func `%s`", node)
 				err = errwrap.Append(err, e) // list of errors
 			}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/purpleidea/mgmt/engine"
 	"github.com/purpleidea/mgmt/lang/types"
+	"github.com/purpleidea/mgmt/pgraph"
 )
 
 // FuncSig is the simple signature that is used throughout our implementations.
@@ -57,6 +58,8 @@ type Init struct {
 // TODO: should we support a static version of this interface for funcs that
 // never change to avoid the overhead of the goroutine and channel listener?
 type Func interface {
+	pgraph.Vertex // must implement this since we store these in the function graph
+
 	Validate() error // FIXME: this is only needed for PolyFunc. Get it moved and used!
 
 	// Info returns some information about the function in question, which
@@ -69,6 +72,13 @@ type Func interface {
 	Init(*Init) error
 	Stream() error
 	Close() error
+
+	// SetValue stores the result of the last computation of this expression
+	// node.
+	SetValue(types.Value) error
+
+	// Value returns the value of this expression in our type system.
+	Value() (types.Value, error)
 }
 
 // PolyFunc is an interface for functions which are statically polymorphic. In
