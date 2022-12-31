@@ -1,0 +1,331 @@
+The many meanings of "function"
+
+type FuncSig = [Value] -> Value
+struct FuncValue { V :: [Value] -> Value }  (now called SimpleFn)
+struct WrappedFunc { Fn :: FuncValue, cachedInput, cachedOutput }
+
+interface Func { Stream() = ? }
+interface PolyFunc extends Func {...}
+
+FunctionFunc wraps an Edge, Func, FuncValue, or Graph; the three possible
+representations for an ExprFun.
+  FunctionFunc::fn() converts the Func or Graph to a FuncValue
+  FunctionFunc::fnFunc() converts the Func to a FuncValue
+  FunctionFunc::fnGraph() converts the Graph to a FuncSig
+
+--
+
+now:
+struct FuncValue { V :: [Vertex] -> Vertex }
+
+--
+
+Q: Why is the value stored in both the Expr and the engine State?
+A: Because StmtRes is a Stmt and thus doesn't have a Func, but it does need to
+   read the latest Value() in order to perform its side-effects.
+
+Q: Why does the engine want the vertices to be instances of Expr? Shouldn't
+   Func be enough?
+A: Looks like a mistake to me.
+
+Q: Why is a Func not accepted as a pgraph.Vertex?
+A: It probably doesn't implement String().
+
+Q: Why does ExprFunc have three possible representations? Shouldn't it be
+   ExprVar which can refer to different possible bindings?
+A: Doesn't matter. The binding points to an Expr, and we have two choices. A
+   choice has been made.
+   1. match on that Expr to see whether it is an ExprLambda, an ExprFunction,
+      or an ExprLegacyPoly
+   2. match on that Expr to find an ExprFunc, and then match on its fields to
+      discover whether it represents a lambda, a function, or a legacy
+      polyfunc.
+
+Q: Why does ExprFunc's third representation, a legacy representation, still
+   exists? can't it just be deleted in favor of the newer representation?
+
+Q: Should a closure store a function graph or an AST graph?
+
+Q: do parameters already have an AST node, "bodyScope.Variables[name]"?
+A: no, ExprFunc only has a list of (name, type) pairs, and
+   ExprFunc::SetScope assigns Variables[name] to the Indexes entries.
+
+Q: what does ExprXXX do?
+
+Q: what does Expr::SetValue do?
+A: stores the result of the last computation of this expression node.
+
+Q: can I use ExprParam::SetValue() to trigger the function graph?
+A: no. ExprCall::SetValue() doesn't sent a value downstream for example.
+   because this is an AST node, not a node in the function graph.
+
+Q: what can I use instead?
+A: looks like VarFunc can receive values from the Init::Input channel
+
+Q: what's the difference between fn.Return and fn.Body?
+A: 
+
+Q: in func($x, $y) {0}, are there nodes for $x and $y?
+A: no, they are fields in the Lambda Expr.
+
+Q: can I use ExprVar instead of ExprParam?
+
+Q: what's the difference between Expr::Graph() and Expr::Func()?
+   are there three graphs? namely
+   1. the AST
+   2. the FRP graph has AST nodes as vertices
+   3. and the function graph, which uses its own nodes
+
+Q: Does the FRP graph use strings or AST nodes as vertices?
+A: I think the nodes are compared by pointer equality, not string equality.
+
+Q: What's the "output graph" mentioned in Stmt::Output()?
+A: Only statements have them, so probable something about resources. Not
+   currently interesting. 
+
+Q: Why do nodes have a Value() method? They don't have a single static value,
+   it changes over time.
+
+Q: How do values sent to the init.Output chan reach multiple downstream nodes?
+A: Each node has its own input and output channels, it is _not_ the case that
+   the upstream's output channel is the downstream's input channel.
+   Each node has a goroutine (spawned from Run) which reads the current _value_
+   of the upstream nodes when the notify channel receives a dummy value, it
+   does _not_ process each upstream value as it is sent down the channel.
+   Each node also has a goroutine (spawned from Run) which receives the output
+   values (and stores them in the Value field of the state?)
+
+Q: How does the engine notice when a node with out-degree zero is updated?
+   How does it avoid a race condition?
+
+Q: Is James confusing Functional Reactive Programming and Reactive Programming?
+   What's the difference?
+
+Q: The function Engine is given a starting Graph, and that Graph never changes
+   after that. I want to support changing the Graph. Should the function Engine
+   start with an empty Graph, or should it still start with an initial Graph?
+
+Q: What's the "aggregate channel" ag for?
+A: A request to check if all the nodes have "loaded", meaning they have emitted
+   at least one value.
+
+--
+
+the WIP branch is too big, and doesn't even compile.
+the unification change doesn't fix any known bug, skip for now.
+the SetScope change doesn't fix any known bug, skip for now.
+BuiltinValue and ClosureValue were superfluous, FuncValue already represents
+  builtins, it holds a go function and is thus expressive enough. skip.
+Lock(), Unlock(), Table(), TestCopy2(), TestCopyWithFn1(), and TestVertexSwap()
+  are all unused. skip.
+what remains?
+- Two incomplete attempt at representing functions as graphs:
+  - ExprFunc::closure
+  - FunctionFunc::Graph
+    seems to have an implementation to actually run the Graph!
+- leftovers from SomeVariablesAreUnknown and Indexes
+- ExprParam
+- ExprXXX, but why? used in fnGraph().
+- extra validation in FunctionFunc::Validate
+- extra debugging in TestAstFunc2
+- AllowRecursion = true
+
+---
+
+I tried merge only the unification changes, but now all the variables are out of scope.
+
+in lang/interpret_test/TestAstFunc1/lambda-chained/main.mcl for example:
+
+    ...
+    $out1 = $prefixer("world")
+    $out2 = $prefixer($out1)  # var `out1` does not exist in this context
+
+    test $out1 {}  # var `out1` does not exist in this context 1
+    test $out2 {}  # var `out2` does not exist in this context 1
+
+are the unification changes even needed?
+the unifications changes are:
+  
+  Unify now takes a context.
+  That context adds dummy nodes representing the parameters of a lambda, which
+    don't have a representation otherwise.
+  should replace the
+    Indexes map[int][]Expr
+    member of Scope objects, but doesn't do that yet.
+  Looks like each parameter already has a node, bodyScope.Variables[name], so
+    maybe this isn't needed?
+  At the call side $f($x), instead of
+    * only asserting type_of($f.Return) = type_of($f($x))
+      when $f is known to be a lambda with a statically-known return type
+    * asserting type_of($f.Body) = type_of($f($x))
+      when $f is known to be a lambda with a statically-known return type
+    * asserting that $f has 1 argument whose type is type_of($x)
+    * constructing a function type containing some unknowns represented as nil
+    * calling Unify() on the lambda
+    
+
+---
+This language has both unification and functions like Printf which can have a
+different type at different call sites depending on the types (and values!) of
+its arguments. So we can't use standard techniques like unification variables.
+
+Builtin functions can have such a polymorphic type. A lambda around a builtin
+function can have such a polymorphic type. Therefore, even a variable can have
+such a polymorphic type.
+
+Maybe the best analogue would be dependent types: the type of printf is
+
+    printf : (xs : List Any) -> PrintfType xs
+
+and this output type will remain unknown until we figure out what xs is.
+
+We can still assert that (PrintfType xs = int), and we can still use
+unification variables, but not all assertions immediately give more information
+about a unification variable.
+
+---
+
+alias mgmt="go run -ldflags '-X main.program=mgmt -X main.version=0.0.22-18-g2f55423' main.go"
+alias mcl="mgmt run lang"
+
+compiler phases:
+  AST
+Unify
+    ( equivalent of
+        TypeCheck :: Ctx
+                  -> AstNode
+                  -> ExceptT String
+                       (State (UVars Type))
+                       ()
+      except that instead of failing and unifying immediately, equality
+      constraints (called "invariants") are produced:
+        TypeCheck :: Ctx
+                  -> AstNode
+                  -> Writer [EqualityConstraint] ()
+      Each AST node represents its own unification variable, so an
+      EqualityConstraint can state that two AST nodes must have the same type,
+      or that a given AST node must have type Int. There are also fancier
+      constraints than equality, in order to support an unusual form of
+      polymorphism.
+    )
+  AST (unmodified)
+compiles to
+  function graph
+which receives inputs from the world and affects the world by setting the inputs of resource nodes.
+
+goal: add support for builtin functions
+lambdas are currently implemented by inlining.
+that doesn't work for builtin functions because their body is not a graph.
+an expression of type A->B could either return a builtin or a lambda, so we have to handle both the same.
+
+strategy: both lambdas and closures compile to nodes producing closure values.
+lambdas have the variables they capture as inputs
+builtins have their parameters as input
+the closure value holds a function graph with some special nodes representing the parameters and the output.
+function application feeds the arguments to the parameter nodes, waits the graph to stabilize, and return the output.
+
+[ ] analyze diff from master
+    all the changes are in a single commit
+
+    lang/ast/structs.go
+      SetScope now returns the new value
+      obj.*.Unify takes a context
+      ExprParam
+      ExprFunc now holds a closure graph
+    lang/funcs/engine.go
+      Lock/Unlock
+      Table
+    lang/funcs/structs/function.go
+      FunctionFunc now holds a subgraph
+      ExprXXX, holding the output
+      ...
+    lang/gapi/gapi.go
+      consequences of SetScope
+    lang/interfaces/ast.go
+      SetScope and Unify's new type signatures
+      SomeVariablesAreUnknown/Indexes
+    lang/interfaces/structs.go
+      more SetScope and Unify
+    lang/interfaces/unification.go
+      just a comment
+    lang/interpret_test.go
+      consequences of SetScope
+      print debug information
+    lang/lang.go
+      consequences of SetScope
+    lang/types/value.go
+      BuiltinValue
+      ClosureValue
+    lang/unification/simplesolver.go
+      AllowRecursion = true
+    lang/unification_test.go
+      consequences of SetScope
+    pgraph/pgraph.go
+      just a comment
+    pgraph/pgraph_test.go
+      three empty, unused? functions TestCopy2/TestCopyWithFn1/TestVertexSwap1
+
+    new tests:
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing1.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing1/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing2.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing2/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing3.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing3/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing4.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg-missing4/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg0.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg0/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg1.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg1/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg10.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg10/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg2.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg2/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg3.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg3/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg4.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg4/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg5.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg5/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg6.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg6/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg7.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg7/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg8.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg8/main.mcl
+      lang/interpret_test/TestAstFunc2/lambda-input-arg9.output
+      lang/interpret_test/TestAstFunc2/lambda-input-arg9/main.mcl
+      lang/interpret_test/TestAstFunc2/map-iterator5.output
+      lang/interpret_test/TestAstFunc2/map-iterator5/main.mcl
+      lang/interpret_test/TestAstFunc2/samtest1.output
+      lang/interpret_test/TestAstFunc2/samtest1/main.mcl
+      lang/interpret_test/TestAstFunc2/samtest2.output
+      lang/interpret_test/TestAstFunc2/samtest2/main.mcl
+      lang/interpret_test/TestAstFunc2/samtest3.output
+      lang/interpret_test/TestAstFunc2/samtest3/main.mcl
+      lang/interpret_test/TestAstFunc2/samtest4.output
+      lang/interpret_test/TestAstFunc2/samtest4/main.mcl
+      lang/interpret_test/TestAstFunc2/scope-closure0.output
+      lang/interpret_test/TestAstFunc2/scope-closure0/main.mcl
+[x] understand the unifications changes
+[n/a] make the tests pass with just the unification changes
+[n/a] merge just the unification changes
+
+[x] understand the set-scope changes
+[n/a] make the tests pass with just the set-scope changes
+[n/a] merge just the set-scope changes
+
+[ ] make the code compile
+[ ] test harness for running arbitrary code
+[ ] load an mcl file and run it in the same way as mcl above
+[ ] load an mcl file and run it until it stabilizes (as opposed to mcl which runs it forever)
+[ ] create a parameter node
+[ ] load an mcl file, replace some parsed node with a parameter node, run function graph until it stabilizes
+[ ] same, then run it again with different inputs.
+[ ] create an output node
+[ ] run the graph twice again, printing the output each time
+[ ] trickier case where the output node triggers zero times
+[ ] trickier case where the output node triggers multiple times
+[ ] create a closure value
+[ ] change lambda nodes, builtins, and function application nodes to use it
