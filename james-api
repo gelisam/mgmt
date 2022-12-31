@@ -1,0 +1,7 @@
+obj.init.GraphAPI.AddVertex( z1 )
+obj.init.GraphAPI.RemoveVertex( )
+obj.init.GraphAPI.AddEdge( z1, obj, edge1 )
+obj.init.GraphAPI.AddEdge( z1, XXX, edge2 )
+obj.init.GraphAPI.RemoveEdge( )
+obj.init.GraphAPI.Lock( )
+obj.init.GraphAPI.Unlock( )
