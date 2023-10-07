@@ -4842,6 +4842,10 @@ func (obj *ExprBool) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *ExprBool) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
+}
+
 // Func returns the reactive stream of values that this expression produces.
 func (obj *ExprBool) Func() (interfaces.Func, error) {
 	return &structs.ConstFunc{
@@ -5022,6 +5026,10 @@ func (obj *ExprStr) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *ExprStr) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
+}
+
 // Func returns the reactive stream of values that this expression produces.
 func (obj *ExprStr) Func() (interfaces.Func, error) {
 	return &structs.ConstFunc{
@@ -5150,6 +5158,10 @@ func (obj *ExprInt) Unify() ([]interfaces.Invariant, error) {
 		},
 	}
 	return invariants, nil
+}
+
+func (obj *ExprInt) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
 }
 
 // Func returns the reactive stream of values that this expression produces.
@@ -5282,6 +5294,10 @@ func (obj *ExprFloat) Unify() ([]interfaces.Invariant, error) {
 		},
 	}
 	return invariants, nil
+}
+
+func (obj *ExprFloat) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
 }
 
 // Func returns the reactive stream of values that this expression produces.
@@ -5594,6 +5610,10 @@ func (obj *ExprList) Unify() ([]interfaces.Invariant, error) {
 	}
 
 	return invariants, nil
+}
+
+func (obj *ExprList) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
 }
 
 // Func returns the reactive stream of values that this expression produces.
@@ -6068,6 +6088,10 @@ func (obj *ExprMap) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *ExprMap) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
+}
+
 // Func returns the reactive stream of values that this expression produces.
 func (obj *ExprMap) Func() (interfaces.Func, error) {
 	typ, err := obj.Type()
@@ -6468,6 +6492,10 @@ func (obj *ExprStruct) Unify() ([]interfaces.Invariant, error) {
 	invariants = append(invariants, invariant)
 
 	return invariants, nil
+}
+
+func (obj *ExprStruct) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
 }
 
 // Func returns the reactive stream of values that this expression produces.
@@ -7202,6 +7230,10 @@ func (obj *ExprFunc) Unify() ([]interfaces.Invariant, error) {
 	}
 
 	return invariants, nil
+}
+
+func (obj *ExprFunc) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
 }
 
 // Graph returns the reactive function graph which is expressed by this node. It
@@ -8129,6 +8161,10 @@ func (obj *ExprCall) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *ExprCall) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -8417,6 +8453,10 @@ func (obj *ExprVar) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *ExprVar) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -8584,6 +8624,10 @@ func (obj *ExprParam) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *ExprParam) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -8713,6 +8757,10 @@ func (obj *ExprPoly) Type() (*types.Type, error) {
 // collection to the caller.
 func (obj *ExprPoly) Unify() ([]interfaces.Invariant, error) {
 	panic("ExprPoly.Unify(): should not happen, all ExprPoly expressions should be gone by the time type-checking starts")
+}
+
+func (obj *ExprPoly) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
 }
 
 // Graph returns the reactive function graph which is expressed by this node. It
@@ -9067,6 +9115,10 @@ func (obj *ExprIf) Unify() ([]interfaces.Invariant, error) {
 	invariants = append(invariants, elseInvar)
 
 	return invariants, nil
+}
+
+func (obj *ExprIf) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
+	panic("TODO")
 }
 
 // Func returns a function which returns the correct branch based on the ever

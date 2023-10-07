@@ -121,6 +121,10 @@ type Expr interface {
 	// returns the collection to the caller.
 	Unify() ([]Invariant, error)
 
+	// TimeCheck determines whether the expression is timeless or not. What that
+	// means is subtle, please refer to the documentation for the Timeless type.
+	TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error)
+
 	// Graph returns the reactive function graph expressed by this node. It
 	// takes in the environment of any functions in scope. It also returns
 	// the function for this node.
