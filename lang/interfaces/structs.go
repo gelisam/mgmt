@@ -129,7 +129,7 @@ func (obj *ExprAny) Unify() ([]Invariant, error) {
 }
 
 func (obj *ExprAny) TimeCheck(env map[string]*types.Timeless) (*types.Timeless, error) {
-	panic("TODO")
+	panic("TimeCheck: ExprAny still in the AST after Unify()")
 }
 
 // Func returns the reactive stream of values that this expression produces.
