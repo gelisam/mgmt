@@ -72,6 +72,11 @@ type Stmt interface {
 	// returns the collection to the caller.
 	Unify() ([]Invariant, error)
 
+	// TimeCheck validates that every resource which receives a function is
+	// guaranteed to always receive a timeless function. See the definition of
+	// Timeless for details.
+	TimeCheck() error
+
 	// Graph returns the reactive function graph expressed by this node.
 	Graph() (*pgraph.Graph, error)
 

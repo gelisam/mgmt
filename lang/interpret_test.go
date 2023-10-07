@@ -509,6 +509,7 @@ func TestAstFunc2(t *testing.T) {
 	const magicInterpolate = "errInterpolate: "
 	const magicErrorSetScope = "errSetScope: "
 	const magicErrorUnify = "errUnify: "
+	const magicErrorTimeCheck = "errTimeCheck: "
 	const magicErrorGraph = "errGraph: "
 	const magicErrorInterpret = "errInterpret: "
 	const magicErrorAutoEdge = "errAutoEdge: "
@@ -645,6 +646,7 @@ func TestAstFunc2(t *testing.T) {
 			failInterpolate := false
 			failSetScope := false
 			failUnify := false
+			failTimeCheck := false
 			failGraph := false
 			failInterpret := false
 			failAutoEdge := false
@@ -676,6 +678,11 @@ func TestAstFunc2(t *testing.T) {
 					errStr = strings.TrimPrefix(expstr, magicErrorUnify)
 					expstr = errStr
 					failUnify = true
+				}
+				if strings.HasPrefix(expstr, magicErrorTimeCheck) {
+					errStr = strings.TrimPrefix(expstr, magicErrorTimeCheck)
+					expstr = errStr
+					failTimeCheck = true
 				}
 				if strings.HasPrefix(expstr, magicErrorGraph) {
 					errStr = strings.TrimPrefix(expstr, magicErrorGraph)
@@ -940,6 +947,30 @@ func TestAstFunc2(t *testing.T) {
 			if failUnify && err == nil {
 				t.Errorf("test #%d: FAIL", index)
 				t.Errorf("test #%d: unification passed, expected fail", index)
+				return
+			}
+
+			// time-check the AST: validate that no resource can ever receive a
+			// timeful function
+			err = xast.TimeCheck()
+			if (!fail || !failTimeCheck) && err != nil {
+				t.Errorf("test #%d: FAIL", index)
+				t.Errorf("test #%d: could not time check: %+v", index, err)
+				return
+			}
+			if failTimeCheck && err != nil {
+				s := err.Error() // convert to string
+				if s != expstr {
+					t.Errorf("test #%d: FAIL", index)
+					t.Errorf("test #%d: expected different error", index)
+					t.Logf("test #%d: err: %s", index, s)
+					t.Logf("test #%d: exp: %s", index, expstr)
+				}
+				return // fail happened during time-checking, don't run Graph!
+			}
+			if failTimeCheck && err == nil {
+				t.Errorf("test #%d: FAIL", index)
+				t.Errorf("test #%d: time-check passed, expected fail", index)
 				return
 			}
 
