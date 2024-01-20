@@ -1,0 +1,24 @@
+-- main.mcl --
+$x1 = "i am x1"	# i am top-level
+$x2 = "i am x2"	# i am top-level
+
+class c2() {
+	$z = "i am y and " + $x1
+
+	$x1 = "hey"	# shadow
+}
+
+include c2 as f1
+
+test $f1.z {}
+test $f1.x1 {}
+
+# the really tricky case
+test $f1.x2 {}
+
+-- OUTPUT --
+XXX ORDERING BUG, SOMETIMES PASSES, SOMETIMES FAILS
+
+Vertex: test[hey]
+Vertex: test[i am x2]
+Vertex: test[i am y and hey]
