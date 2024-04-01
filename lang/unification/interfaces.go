@@ -63,6 +63,12 @@ type Init struct {
 	Logf  func(format string, v ...interface{})
 }
 
+// Data contains the input data for the solver to process.
+type Data struct {
+	Invariants []interfaces.Invariant
+	Expected   []interfaces.Expr
+}
+
 // Solver is the general interface that any solver needs to implement.
 type Solver interface {
 	// Init initializes the solver struct before first use.
@@ -70,7 +76,7 @@ type Solver interface {
 
 	// Solve performs the actual solving. It must return as soon as possible
 	// if the context is closed.
-	Solve(ctx context.Context, invariants []interfaces.Invariant, expected []interfaces.Expr) (*InvariantSolution, error)
+	Solve(context.Context, *Data) (*InvariantSolution, error)
 }
 
 // registeredSolvers is a global map of all possible unification solvers which

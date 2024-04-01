@@ -125,8 +125,13 @@ func (obj *SimpleInvariantSolver) Init(init *unification.Init) error {
 	return nil
 }
 
-// Solve is the actual solve implementation of the solver.
-func (obj *SimpleInvariantSolver) Solve(ctx context.Context, invariants []interfaces.Invariant, expected []interfaces.Expr) (*unification.InvariantSolution, error) {
+// Solve is the entry point for the solver.
+func (obj *SimpleInvariantSolver) Solve(ctx context.Context, data *unification.Data) (*unification.InvariantSolution, error) {
+	return obj.solve(ctx, data.Invariants, data.Expected)
+}
+
+// solve is the actual solve implementation of the solver.
+func (obj *SimpleInvariantSolver) solve(ctx context.Context, invariants []interfaces.Invariant, expected []interfaces.Expr) (*unification.InvariantSolution, error) {
 	process := func(invariants []interfaces.Invariant) ([]interfaces.Invariant, []*interfaces.ExclusiveInvariant, error) {
 		equalities := []interfaces.Invariant{}
 		exclusives := []*interfaces.ExclusiveInvariant{}
@@ -1299,7 +1304,7 @@ Loop:
 				recursiveInvariants = append(recursiveInvariants, ex...)
 				// FIXME: implement RecursionDepthLimit
 				obj.Logf("%s: recursing...", Name)
-				solution, err := obj.Solve(ctx, recursiveInvariants, expected)
+				solution, err := obj.solve(ctx, recursiveInvariants, expected)
 				if err != nil {
 					obj.Logf("%s: recursive solution failed: %+v", Name, err)
 					continue // no solution found here...

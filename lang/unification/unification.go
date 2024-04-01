@@ -110,7 +110,11 @@ func (obj *Unifier) Unify(ctx context.Context) error {
 	exprMap := ExprListToExprMap(exprs)    // makes searching faster
 	exprList := ExprMapToExprList(exprMap) // makes it unique (no duplicates)
 
-	solved, err := obj.Solver.Solve(ctx, invariants, exprList)
+	data := &Data{
+		Invariants: invariants,
+		Expected:   exprList,
+	}
+	solved, err := obj.Solver.Solve(ctx, data)
 	if err != nil {
 		return err
 	}
