@@ -140,6 +140,33 @@ func (obj *ExprAny) Unify() ([]Invariant, error) {
 	return invariants, nil
 }
 
+// Infer XXX
+func (obj *ExprAny) Infer() (*types.Type, []*UnificationInvariant, error) {
+	// XXX: What should we return here?
+	// XXX: obj.typ ???
+
+	return types.TypeVariant, []*UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprAny) Check(typ *types.Type) ([]*UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
 // Func returns the reactive stream of values that this expression produces.
 func (obj *ExprAny) Func() (Func, error) {
 	//	// XXX: this could be a list too, so improve this code or improve the subgraph code...

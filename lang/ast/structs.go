@@ -302,6 +302,24 @@ func (obj *StmtBind) Unify() ([]interfaces.Invariant, error) {
 	return obj.Value.Unify()
 }
 
+func (obj *StmtBind) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+
+	typ, invariants, err := obj.Value.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+	if err != nil {
+		return nil, err
+	}
+
+	// XXX DON'T CALL THIS
+	//invars, err := obj.Value.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//invariants = append(invariants, invars...) // XXX not needed
+	_ = typ // unused
+
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -610,6 +628,34 @@ func (obj *StmtRes) Unify() ([]interfaces.Invariant, error) {
 		Type: types.TypeListStr,
 	}
 	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
+func (obj *StmtRes) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+
+	// XXX: This is a list of strings or a string... Add those invariants somehow!
+
+	typ, invariants, err := obj.Name.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, x := range obj.Contents {
+		invars, err := x.TypeCheck(obj.Kind) // pass in the resource kind
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+
+	// XXX DON'T CALL THIS
+	//invars, err := obj.Value.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//invariants = append(invariants, invars...) // XXX not needed
+	_ = typ // unused
 
 	return invariants, nil
 }
@@ -1417,6 +1463,43 @@ func (obj *StmtResField) Unify(kind string) ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *StmtResField) TypeCheck(kind string) ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+
+	// XXX: Do the above Unify checks in here???
+	// XXX: Handle the variant resource fields too!
+
+	typ, invariants, err := obj.Value.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+	if err != nil {
+		return nil, err
+	}
+
+	// XXX DON'T CALL THIS
+	//invars, err := obj.Value.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//invariants = append(invariants, invars...) // XXX not needed
+	_ = typ // unused
+
+	if obj.Condition != nil {
+		typ, invars, err := obj.Condition.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+
+		// XXX DON'T CALL THIS
+		//invars, err := obj.Value.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//invariants = append(invariants, invars...) // XXX not needed
+		_ = typ // unused
+	}
+
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -1648,6 +1731,31 @@ func (obj *StmtResEdge) Unify(kind string) ([]interfaces.Invariant, error) {
 			Type: types.TypeBool,
 		}
 		invariants = append(invariants, conditionInvar)
+	}
+
+	return invariants, nil
+}
+
+func (obj *StmtResEdge) TypeCheck(kind string) ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+	invariants, err := obj.EdgeHalf.TypeCheck()
+	if err != nil {
+		return nil, err
+	}
+
+	if obj.Condition != nil {
+		typ, invars, err := obj.Condition.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+
+		// XXX DON'T CALL THIS
+		//invars, err := obj.Value.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//invariants = append(invariants, invars...) // XXX not needed
+		_ = typ // unused
 	}
 
 	return invariants, nil
@@ -1982,6 +2090,35 @@ func (obj *StmtResMeta) Unify(kind string) ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *StmtResMeta) TypeCheck(kind string) ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+
+	typ, invariants, err := obj.MetaExpr.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+	if err != nil {
+		return nil, err
+	}
+
+	if obj.Condition != nil {
+		typ, invars, err := obj.Condition.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+		if err != nil {
+			return nil, err
+		}
+
+		invariants = append(invariants, invars...)
+
+		_ = typ // unused
+	}
+
+	// XXX DON'T CALL THIS
+	//invars, err := obj.MetaExpr.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//invariants = append(invariants, invars...) // XXX not needed
+	_ = typ // unused
+
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -2232,6 +2369,84 @@ func (obj *StmtEdge) Unify() ([]interfaces.Invariant, error) {
 		}
 
 		invars, err := x.Unify()
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+
+	return invariants, nil
+}
+
+func (obj *StmtEdge) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+	// XXX: Should we check the edge lengths here?
+
+	// TODO: this sort of sideloaded validation could happen in a dedicated
+	// Validate() function, but for now is here for lack of a better place!
+	if len(obj.EdgeHalfList) == 1 {
+		return nil, fmt.Errorf("can't create an edge with only one half")
+	}
+	if len(obj.EdgeHalfList) == 2 {
+		sr1 := obj.EdgeHalfList[0].SendRecv
+		sr2 := obj.EdgeHalfList[1].SendRecv
+		if (sr1 == "") != (sr2 == "") { // xor
+			return nil, fmt.Errorf("you must specify both send/recv fields or neither")
+		}
+
+		if sr1 != "" && sr2 != "" {
+			k1 := obj.EdgeHalfList[0].Kind
+			k2 := obj.EdgeHalfList[1].Kind
+
+			r1, err := engine.NewResource(k1)
+			if err != nil {
+				return nil, err
+			}
+			r2, err := engine.NewResource(k2)
+			if err != nil {
+				return nil, err
+			}
+			res1, ok := r1.(engine.SendableRes)
+			if !ok {
+				return nil, fmt.Errorf("cannot send from resource of kind: %s", k1)
+			}
+			res2, ok := r2.(engine.RecvableRes)
+			if !ok {
+				return nil, fmt.Errorf("cannot recv to resource of kind: %s", k2)
+			}
+
+			// Check that the kind1:send -> kind2:recv fields are type
+			// compatible! We won't know the names yet, but it's okay.
+			if err := engineUtil.StructFieldCompat(res1.Sends(), sr1, res2, sr2); err != nil {
+				p1 := k1 // print defaults
+				p2 := k2
+				if v, err := obj.EdgeHalfList[0].Name.Value(); err == nil { // statically known
+					// display something nicer
+					if v.Type().Kind == types.KindStr {
+						p1 = engine.Repr(k1, v.Str())
+					} else if v.Type().Cmp(types.NewType("[]str")) == nil {
+						p1 = engine.Repr(k1, v.String())
+					}
+				}
+				if v, err := obj.EdgeHalfList[1].Name.Value(); err == nil {
+					if v.Type().Kind == types.KindStr {
+						p2 = engine.Repr(k2, v.Str())
+					} else if v.Type().Cmp(types.NewType("[]str")) == nil {
+						p2 = engine.Repr(k2, v.String())
+					}
+				}
+				return nil, errwrap.Wrapf(err, "cannot send/recv from %s.%s to %s.%s", p1, sr1, p2, sr2)
+			}
+		}
+	}
+
+	invariants := []*interfaces.UnificationInvariant{}
+
+	for _, x := range obj.EdgeHalfList {
+		if x.SendRecv != "" && len(obj.EdgeHalfList) != 2 { // XXX: mod 2?
+			return nil, fmt.Errorf("send/recv edges must come in pairs")
+		}
+
+		invars, err := x.TypeCheck()
 		if err != nil {
 			return nil, err
 		}
@@ -2499,6 +2714,26 @@ func (obj *StmtEdgeHalf) Unify() ([]interfaces.Invariant, error) {
 		Type: types.TypeListStr,
 	}
 	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
+func (obj *StmtEdgeHalf) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+
+	// XXX: This is a list of strings or a string... Add those invariants somehow!
+
+	typ, invariants, err := obj.Name.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+	if err != nil {
+		return nil, err
+	}
+
+	// XXX DON'T CALL THIS
+	//invars, err := obj.Name.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//invariants = append(invariants, invars...) // XXX not needed
+	_ = typ // unused
 
 	return invariants, nil
 }
@@ -2800,6 +3035,40 @@ func (obj *StmtIf) Unify() ([]interfaces.Invariant, error) {
 			return nil, err
 		}
 		invariants = append(invariants, elseBranch...)
+	}
+
+	return invariants, nil
+}
+
+func (obj *StmtIf) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+
+	typ, invariants, err := obj.Condition.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+	if err != nil {
+		return nil, err
+	}
+
+	// XXX DON'T CALL THIS
+	//invars, err := obj.Condition.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//invariants = append(invariants, invars...) // XXX not needed
+	_ = typ // unused
+
+	if obj.ThenBranch != nil {
+		invars, err := obj.ThenBranch.TypeCheck()
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+
+	if obj.ElseBranch != nil {
+		invars, err := obj.ElseBranch.TypeCheck()
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
 	}
 
 	return invariants, nil
@@ -4152,6 +4421,39 @@ func (obj *StmtProg) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *StmtProg) TypeCheck() ([]*interfaces.UnificationInvariant, error) {
+	invariants := []*interfaces.UnificationInvariant{} // XXX OKAY TO MUTATE ME
+
+	for _, x := range obj.Body {
+		// skip over *StmtClass here
+		if _, ok := x.(*StmtClass); ok { // We skip because this will be insantiated potentially with different types.
+			continue
+		}
+		if _, ok := x.(*StmtFunc); ok { // We skip because this will be insantiated potentially with different types.
+			continue
+		}
+		//if _, ok := x.(*StmtBind); ok { // we need this one
+		//	continue
+		//}
+
+		invars, err := x.TypeCheck()
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+
+	// add invariants from SetScope's imported child programs
+	for _, x := range obj.importProgs {
+		invars, err := x.TypeCheck()
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -4420,6 +4722,34 @@ func (obj *StmtFunc) Unify() ([]interfaces.Invariant, error) {
 	return []interfaces.Invariant{}, nil
 }
 
+func (obj *StmtFunc) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+	if obj.Name == "" {
+		return nil, fmt.Errorf("missing function name")
+	}
+
+	// I think the invariants should come in from ExprCall instead, because
+	// ExprCall operates on an instatiated copy of the contained ExprFunc
+	// which will have different pointers than what is seen here.
+
+	// nope!
+	//typ, invariants, err := obj.Func.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+	//if err != nil {
+	//	return nil, err
+	//}
+
+	//// XXX DON'T CALL THIS
+	////invars, err := obj.Func.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+	////if err != nil {
+	////	return nil, err
+	////}
+	////invariants = append(invariants, invars...) // XXX not needed
+	//_ = typ // unused
+
+	//return invariants, nil
+
+	return []*interfaces.UnificationInvariant{}, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -4612,6 +4942,21 @@ func (obj *StmtClass) Unify() ([]interfaces.Invariant, error) {
 
 	// TODO: do we need to add anything else here because of the obj.Args ?
 	return obj.Body.Unify()
+}
+
+func (obj *StmtClass) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+	if obj.Name == "" {
+		return nil, fmt.Errorf("missing class name")
+	}
+
+	// TODO: do we need to add anything else here because of the obj.Args ?
+
+	invariants, err := obj.Body.TypeCheck()
+	if err != nil {
+		return nil, err
+	}
+
+	return invariants, nil
 }
 
 // Graph returns the reactive function graph which is expressed by this node. It
@@ -4967,6 +5312,51 @@ func (obj *StmtInclude) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+func (obj *StmtInclude) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+
+	if obj.Name == "" {
+		return nil, fmt.Errorf("missing include name")
+	}
+	if obj.class == nil {
+		// possible programming error
+		return nil, fmt.Errorf("include doesn't contain a class pointer yet")
+	}
+
+	// Is it even possible for the signatures to not match?
+	if len(obj.class.Args) != len(obj.Args) {
+		return nil, fmt.Errorf("class `%s` expected %d args but got %d", obj.Name, len(obj.class.Args), len(obj.Args))
+	}
+
+	// do this here because we skip doing it in the StmtProg parent
+	invariants, err := obj.class.TypeCheck()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, x := range obj.Args {
+		typ, invars, err := x.Infer() // (*types.Type, []*interfaces.UnificationInvariant, error)
+		if err != nil {
+			return nil, err
+		}
+		invariants = append(invariants, invars...)
+
+		// XXX DON'T CALL THIS
+		//invars, err := obj.Value.Check(typ) // ([]*interfaces.UnificationInvariant, error)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//invariants = append(invariants, invars...) // XXX not needed
+		_ = typ // unused
+
+		// XXX: Do this stuff here?
+
+		// TODO: are additional invariants required?
+		// add invariants between the args and the class
+	}
+
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -5080,6 +5470,10 @@ func (obj *StmtImport) Unify() ([]interfaces.Invariant, error) {
 	return []interfaces.Invariant{}, nil
 }
 
+func (obj *StmtImport) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+	return []*interfaces.UnificationInvariant{}, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -5164,6 +5558,10 @@ func (obj *StmtComment) SetScope(*interfaces.Scope) error { return nil }
 // collection to the caller.
 func (obj *StmtComment) Unify() ([]interfaces.Invariant, error) {
 	return []interfaces.Invariant{}, nil
+}
+
+func (obj *StmtComment) TypeCheck() ([]*interfaces.UnificationInvariant, error) { // XXX Add a context in and out (type tcontext)
+	return []*interfaces.UnificationInvariant{}, nil
 }
 
 // Graph returns the reactive function graph which is expressed by this node. It
@@ -5261,6 +5659,30 @@ func (obj *ExprBool) Unify() ([]interfaces.Invariant, error) {
 			Type: types.TypeBool,
 		},
 	}
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprBool) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	return types.TypeBool, []*interfaces.UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprBool) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
 	return invariants, nil
 }
 
@@ -5448,6 +5870,30 @@ func (obj *ExprStr) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+// Infer XXX
+func (obj *ExprStr) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	return types.TypeStr, []*interfaces.UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprStr) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
 // Func returns the reactive stream of values that this expression produces.
 func (obj *ExprStr) Func() (interfaces.Func, error) {
 	return &structs.ConstFunc{
@@ -5575,6 +6021,30 @@ func (obj *ExprInt) Unify() ([]interfaces.Invariant, error) {
 			Type: types.TypeInt,
 		},
 	}
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprInt) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	return types.TypeInt, []*interfaces.UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprInt) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
 	return invariants, nil
 }
 
@@ -5707,6 +6177,30 @@ func (obj *ExprFloat) Unify() ([]interfaces.Invariant, error) {
 			Type: types.TypeFloat,
 		},
 	}
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprFloat) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	return types.TypeFloat, []*interfaces.UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprFloat) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
 	return invariants, nil
 }
 
@@ -6018,6 +6512,71 @@ func (obj *ExprList) Unify() ([]interfaces.Invariant, error) {
 		}
 		invariants = append(invariants, invar)
 	}
+
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprList) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	invariants := []*interfaces.UnificationInvariant{}
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX WHAT GOES HERE?
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Same unification var because all values in the list have same type.
+	typ := &types.Type{
+		Kind: types.KindUnification,
+		Uni:  types.NewElem(), // unification variable, eg: ?1
+	}
+	typExpr := &types.Type{
+		Kind: types.KindList,
+		Val:  typ,
+	}
+
+	for _, x := range obj.Elements {
+		invars, err := x.Check(typ) // typ of the list element
+		if err != nil {
+			return nil, nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+
+	return typExpr, invariants, nil
+}
+
+// Check XXX
+func (obj *ExprList) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX: LOOK ABOVE, this fits, but does Check even ALWAYS get called for this List???
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
 
 	return invariants, nil
 }
@@ -6494,6 +7053,82 @@ func (obj *ExprMap) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+// Infer XXX
+func (obj *ExprMap) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	invariants := []*interfaces.UnificationInvariant{}
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX WHAT GOES HERE?
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Same unification var because all key/val's in the map have same type.
+	ktyp := &types.Type{
+		Kind: types.KindUnification,
+		Uni:  types.NewElem(), // unification variable, eg: ?1
+	}
+	vtyp := &types.Type{
+		Kind: types.KindUnification,
+		Uni:  types.NewElem(), // unification variable, eg: ?2
+	}
+	typExpr := &types.Type{
+		Kind: types.KindMap,
+		Key:  ktyp,
+		Val:  vtyp,
+	}
+
+	for _, x := range obj.KVs {
+		keyInvars, err := x.Key.Check(ktyp) // typ of the map key
+		if err != nil {
+			return nil, nil, err
+		}
+		invariants = append(invariants, keyInvars...)
+
+		valInvars, err := x.Val.Check(vtyp) // typ of the map val
+		if err != nil {
+			return nil, nil, err
+		}
+		invariants = append(invariants, valInvars...)
+	}
+
+	return typExpr, invariants, nil
+}
+
+// Check XXX
+func (obj *ExprMap) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX: LOOK ABOVE, this fits, but does Check even ALWAYS get called for this List???
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
 // Func returns the reactive stream of values that this expression produces.
 func (obj *ExprMap) Func() (interfaces.Func, error) {
 	typ, err := obj.Type()
@@ -6892,6 +7527,79 @@ func (obj *ExprStruct) Unify() ([]interfaces.Invariant, error) {
 		Expr2Ord: ordered,
 	}
 	invariants = append(invariants, invariant)
+
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprStruct) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	invariants := []*interfaces.UnificationInvariant{}
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX WHAT GOES HERE?
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	m := make(map[string]*types.Type)
+	ord := []string{}
+
+	// Different unification var for each field in the struct.
+	for _, x := range obj.Fields {
+		typ := &types.Type{
+			Kind: types.KindUnification,
+			Uni:  types.NewElem(), // unification variable, eg: ?1
+		}
+
+		m[x.Name] = typ
+		ord = append(ord, x.Name)
+
+		invars, err := x.Value.Check(typ) // typ of the struct field
+		if err != nil {
+			return nil, nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+
+	typExpr := &types.Type{
+		Kind: types.KindStruct,
+		Map:  m,
+		Ord:  ord,
+	}
+
+	return typExpr, invariants, nil
+}
+
+// Check XXX
+func (obj *ExprStruct) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX: LOOK ABOVE, this fits, but does Check even ALWAYS get called for this List???
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
 
 	return invariants, nil
 }
@@ -7651,6 +8359,112 @@ func (obj *ExprFunc) Unify() ([]interfaces.Invariant, error) {
 		}
 		invariants = append(invariants, invar)
 	}
+
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprFunc) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	invariants := []*interfaces.UnificationInvariant{}
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX WHAT GOES HERE?
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// XXX: What do we do about obj.Return ? // *types.Type
+	// XXX: What do we do about obj.Args ?   // []*interfaces.Arg : struct{string; *types.Type}
+	// XXX: What do we do about obj.params ? // []*ExprParam : struct{string; *types.Type} // this is an Expr!
+
+	m := make(map[string]*types.Type)
+	ord := []string{}
+	//var out *types.Type // XXX
+
+	if len(obj.Args) != len(obj.params) {
+		// XXX is this an error?
+	}
+
+	for i, arg := range obj.Args {
+		typArg := &types.Type{
+			Kind: types.KindUnification,
+			Uni:  types.NewElem(), // unification variable, eg: ?1
+		}
+
+		// XXX: arg.Type ???
+		invars, err := obj.params[i].Check(typArg) // XXX: is this correct?
+		if err != nil {
+			return nil, nil, err
+		}
+		invariants = append(invariants, invars...)
+
+		ord = append(ord, arg.Name)
+		m[arg.Name] = typArg
+	}
+
+	typBody := &types.Type{
+		Kind: types.KindUnification,
+		Uni:  types.NewElem(), // unification variable, eg: ?1
+	}
+
+	if obj.Body != nil {
+		invars, err := obj.Body.Check(typBody) // typ of the func body
+		if err != nil {
+			return nil, nil, err
+		}
+		invariants = append(invariants, invars...)
+	}
+
+	if obj.Function != nil {
+		panic("not implemented") // XXX !!!
+	}
+
+	//if len(obj.Values) > 0
+	for _, fn := range obj.Values {
+		_ = fn
+		panic("not implemented") // XXX !!!
+	}
+
+	typExpr := &types.Type{
+		Kind: types.KindFunc,
+		Map:  m,
+		Ord:  ord,
+		Out:  typBody,
+	}
+
+	return typExpr, invariants, nil
+}
+
+// Check XXX
+func (obj *ExprFunc) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX: LOOK ABOVE, this fits, but does Check even ALWAYS get called for this List???
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
 
 	return invariants, nil
 }
@@ -8591,6 +9405,58 @@ func (obj *ExprCall) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+// Infer XXX
+func (obj *ExprCall) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	if obj.expr == nil {
+		// possible programming error
+		return nil, nil, fmt.Errorf("call doesn't contain an expr pointer yet")
+	}
+
+	//invariants := []*interfaces.UnificationInvariant{}
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX WHAT GOES HERE?
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	panic("not implemented")
+}
+
+// Check XXX
+func (obj *ExprCall) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX: LOOK ABOVE, this fits, but does Check even ALWAYS get called for this List???
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -8884,6 +9750,58 @@ func (obj *ExprVar) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+// func (obj *ExprVar) Infer(typCtx map[string]*types.Type) (*types.Type, []*interfaces.UnificationInvariant, error) {
+func (obj *ExprVar) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+
+	panic("not implemented") // XXX !!!
+
+	// XXX WRONG
+	//typ := &types.Type{
+	//	Kind: types.KindUnification,
+	//	Uni:  types.NewElem(), // unification variable, eg: ?1
+	//}
+
+	//expr, exists := obj.scope.Variables[obj.Name]
+	//if !exists {
+	//	return nil, fmt.Errorf("var `%s` does not exist in this scope", obj.Name)
+	//}
+
+	//invariants, err := expr.Check(typ)
+	//if err != nil {
+	//	return nil, nil, err
+	//}
+
+	//return typ, invariants, nil
+}
+
+func (obj *ExprVar) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// XXX: []*interfaces.UnificationInvariant could be a single global list that we pass through with Init instead of returning...
+
+	// XXX: simple way to do this:
+	//sam := &interfaces.UnificationInvariant{
+	//	Expr: obj,
+	//	Expect: typ, // XXX sam says these two are not backwards
+	//	Actual: types.TypeInt,
+	//}
+	//return []*interfaces.UnificationInvariant{sam}, nil
+
+	// XXX: generic version of this:
+	// INT wants to be inferred, it likes this because it knows it's an Int.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	sam := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+
+	invariants = append(invariants, sam)
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -9067,6 +9985,31 @@ func (obj *ExprParam) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+// Infer XXX
+func (obj *ExprParam) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	panic("not implemented")
+	//return types.XXX, []*interfaces.UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprParam) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -9177,6 +10120,30 @@ func (obj *ExprPoly) Type() (*types.Type, error) {
 // collection to the caller.
 func (obj *ExprPoly) Unify() ([]interfaces.Invariant, error) {
 	panic("ExprPoly.Unify(): should not happen, all ExprPoly expressions should be gone by the time type-checking starts")
+}
+
+// Infer XXX
+func (obj *ExprPoly) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	panic("ExprPoly.Infer(): should not happen, all ExprPoly expressions should be gone by the time type-checking starts")
+}
+
+// Check XXX
+func (obj *ExprPoly) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
 }
 
 // Graph returns the reactive function graph which is expressed by this node. It
@@ -9357,6 +10324,31 @@ func (obj *ExprTopLevel) Unify() ([]interfaces.Invariant, error) {
 	return invariants, nil
 }
 
+// Infer XXX
+func (obj *ExprTopLevel) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	panic("not implemented")
+	//return types.XXX, []*interfaces.UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprTopLevel) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
 // Graph returns the reactive function graph which is expressed by this node. It
 // includes any vertices produced by this node, and the appropriate edges to any
 // vertices that are produced by its children. Nodes which fulfill the Expr
@@ -9531,6 +10523,31 @@ func (obj *ExprSingleton) Unify() ([]interfaces.Invariant, error) {
 	// We don't want this to have it's SetType run in the unified solution.
 	invar = &interfaces.SkipInvariant{
 		Expr: obj,
+	}
+	invariants = append(invariants, invar)
+
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprSingleton) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	panic("not implemented")
+	//return types.XXX, []*interfaces.UnificationInvariant{}, nil
+}
+
+// Check XXX
+func (obj *ExprSingleton) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
 	}
 	invariants = append(invariants, invar)
 
@@ -9899,6 +10916,79 @@ func (obj *ExprIf) Unify() ([]interfaces.Invariant, error) {
 		Expr2: obj.ElseBranch,
 	}
 	invariants = append(invariants, elseInvar)
+
+	return invariants, nil
+}
+
+// Infer XXX
+func (obj *ExprIf) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
+	invariants := []*interfaces.UnificationInvariant{}
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX WHAT GOES HERE?
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	typExpr := types.TypeBool
+
+	conditionInvars, err := obj.Condition.Check(typExpr) // XXX BOOL type here?
+	if err != nil {
+		return nil, nil, err
+	}
+	invariants = append(invariants, conditionInvars...)
+
+	// Same unification var because both branches must have the same type.
+	typ := &types.Type{
+		Kind: types.KindUnification,
+		Uni:  types.NewElem(), // unification variable, eg: ?1
+	}
+
+	thenInvars, err := obj.ThenBranch.Check(typ)
+	if err != nil {
+		return nil, nil, err
+	}
+	invariants = append(invariants, thenInvars...)
+
+	elseInvars, err := obj.ElseBranch.Check(typ)
+	if err != nil {
+		return nil, nil, err
+	}
+	invariants = append(invariants, elseInvars...)
+
+	return typExpr, invariants, nil
+}
+
+// Check XXX
+func (obj *ExprIf) Check(typ *types.Type) ([]*interfaces.UnificationInvariant, error) {
+	//if obj.typ != nil {
+	//	// XXX: IS THIS CORRECT AND IN THE CORRECT PLACE?
+	//	invar := &interfaces.UnificationInvariant{
+	//		Expr:   obj,
+	//		Expect: typ, // XXX: LOOK ABOVE, this fits, but does Check even ALWAYS get called for this List???
+	//		Actual: obj.typ,
+	//	}
+	//	invariants = append(invariants, invar)
+	//
+	//}
+
+	// Generic implementation of Check:
+	// This wants to be inferred, because it always knows its type.
+	actual, invariants, err := obj.Infer()
+	if err != nil {
+		return nil, err
+	}
+
+	invar := &interfaces.UnificationInvariant{
+		Expr:   obj,
+		Expect: typ, // XXX sam says these two are not backwards
+		Actual: actual,
+	}
+	invariants = append(invariants, invar)
 
 	return invariants, nil
 }
