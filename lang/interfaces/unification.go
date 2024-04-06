@@ -37,6 +37,14 @@ import (
 	"github.com/purpleidea/mgmt/util/errwrap"
 )
 
+// XXX the problem with this being part of the interfaces.Expr API is that we
+// can't return an ExclusiveInvariant for when we have more than one possibility.
+type UnificationInvariant struct { // XXX: formerly the SamInvariant
+	Expr   Expr        // this is here so the error messages don't suck
+	Expect *types.Type // XXX DOCS
+	Actual *types.Type // XXX DOCS
+}
+
 // Invariant represents a constraint that is described by the Expr's and Stmt's,
 // and which is passed into the unification solver to describe what is known by
 // the AST.

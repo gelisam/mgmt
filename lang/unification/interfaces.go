@@ -67,6 +67,9 @@ type Init struct {
 type Data struct {
 	Invariants []interfaces.Invariant
 	Expected   []interfaces.Expr
+
+	// UnificationInvariants is an alternate data representation for Solve.
+	UnificationInvariants []*interfaces.UnificationInvariant
 }
 
 // Solver is the general interface that any solver needs to implement.

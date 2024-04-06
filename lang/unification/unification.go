@@ -96,6 +96,23 @@ func (obj *Unifier) Unify(ctx context.Context) error {
 		return err
 	}
 
+	// XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX
+
+	//unificationInvariants, typCtx, err := obj.AST.TypeCheck(map[string]*types.Type{}) // ([]*UnificationInvariant, error)
+	unificationInvariants, err := obj.AST.TypeCheck() // ([]*UnificationInvariant, error)
+	if err != nil {
+		return err
+	}
+	//_ = typCtx
+
+	//Solve(unificationInvariants)
+
+	// Check there are no more ?mark types.
+
+	// SetType on everything...
+
+	// XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX XXX
+
 	// build a list of what we think we need to solve for to succeed
 	exprs := []interfaces.Expr{}
 	skips := make(map[interfaces.Expr]struct{})
@@ -113,8 +130,10 @@ func (obj *Unifier) Unify(ctx context.Context) error {
 	data := &Data{
 		Invariants: invariants,
 		Expected:   exprList,
+
+		UnificationInvariants: unificationInvariants,
 	}
-	solved, err := obj.Solver.Solve(ctx, data)
+	solved, err := obj.Solver.Solve(ctx, data) // often does union find
 	if err != nil {
 		return err
 	}
