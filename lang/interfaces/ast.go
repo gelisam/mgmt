@@ -84,6 +84,9 @@ type Stmt interface {
 	// returns the collection to the caller.
 	Unify() ([]Invariant, error)
 
+	// XXX TypeCheck
+	TypeCheck() ([]*UnificationInvariant, error) // XXX Add a context in and out (type tcontext)
+
 	// Graph returns the reactive function graph expressed by this node.
 	Graph() (*pgraph.Graph, error)
 
@@ -132,6 +135,10 @@ type Expr interface {
 	// so recursively on any children elements that exist in the AST, and
 	// returns the collection to the caller.
 	Unify() ([]Invariant, error)
+
+	// XXX Infer/Check
+	Infer() (*types.Type, []*UnificationInvariant, error)
+	Check(typ *types.Type) ([]*UnificationInvariant, error)
 
 	// Graph returns the reactive function graph expressed by this node. It
 	// takes in the environment of any functions in scope. It also returns

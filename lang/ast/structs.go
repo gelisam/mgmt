@@ -1212,6 +1212,8 @@ type StmtResContents interface {
 	Ordering(map[string]interfaces.Node) (*pgraph.Graph, map[interfaces.Node]string, error)
 	SetScope(*interfaces.Scope) error
 	Unify(kind string) ([]interfaces.Invariant, error) // different!
+	// XXX Add a context in and out (type tcontext)
+	TypeCheck(kind string) ([]*interfaces.UnificationInvariant, error)
 	Graph() (*pgraph.Graph, error)
 }
 
