@@ -36,12 +36,16 @@ import (
 	"strings"
 
 	"github.com/purpleidea/mgmt/util"
+	"github.com/purpleidea/mgmt/util/disjoint"
 	"github.com/purpleidea/mgmt/util/errwrap"
 )
 
 const (
 	// StructTag is the key we use in struct field names for key mapping.
 	StructTag = "lang"
+
+	// MaxInt8 is 127. It's max uint8: ^uint8(0), then we >> 1 for max int8.
+	MaxInt8 = int((^uint8(0)) >> 1)
 )
 
 // Basic types defined here as a convenience for use with Type.Cmp(X).
@@ -71,6 +75,8 @@ const (
 	KindStruct
 	KindFunc
 	KindVariant
+
+	KindUnification = Kind(MaxInt8) // keep this last
 )
 
 // Type is the datastructure representing any type. It can be recursive for
@@ -85,6 +91,20 @@ type Type struct {
 	Ord []string
 	Out *Type // if Kind == Func, use Map and Ord for Input, Out for Output
 	Var *Type // if Kind == Variant, use Var only
+
+	// unification variable (question mark, eg ?1, ?2)
+	Uni *Elem // if Kind == Unification (optional) use Uni only
+}
+
+// Elem is the type used for the unification variable in the Uni field of Type.
+// We create this alias here to avoid needing to write *disjoint.Elem[*Type] all
+// over. This is a golang type alias. These should be created with NewElem.
+type Elem = disjoint.Elem[*Type]
+
+// NewElem creates a new set with one element and returns the sole element (the
+// representative element) of that set.
+func NewElem() *Elem {
+	return disjoint.NewElem[*Type]()
 }
 
 // TypeOf takes a reflect.Type and returns an equivalent *Type. It removes any
