@@ -31,8 +31,11 @@ package fastsolver
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/purpleidea/mgmt/lang/interfaces"
+	"github.com/purpleidea/mgmt/lang/types"
 	"github.com/purpleidea/mgmt/lang/unification"
 	unificationUtil "github.com/purpleidea/mgmt/lang/unification/util"
 	"github.com/purpleidea/mgmt/util/errwrap"
@@ -125,5 +128,86 @@ func (obj *FastInvariantSolver) Solve(ctx context.Context, data *unification.Dat
 		}
 	}
 
-	panic("not implemented") // XXX RETURN SOMETHING
+	// Now that all the constraints have been unified, we know everything there is
+	// to know about every unification variable. Any remaining unification
+	// variable is thus a place in the code where the type is ambiguous.
+	var solutions []*interfaces.EqualsInvariant
+	for _, x := range data.UnificationInvariants {
+		zonkedType := zonk(x.Actual)
+		if containsUnificationVariable(zonkedType) {
+			return nil, fmt.Errorf("%s's type is ambiguous: %s", x.Expr, zonkedType)
+		}
+		solutions = append(solutions, &interfaces.EqualsInvariant{
+			Expr: x.Expr,
+			Type: zonkedType,
+		})
+	}
+
+	return &unification.InvariantSolution{
+		Solutions: solutions,
+	}, nil
+}
+
+// zonk is a helper function that recursively replaces all unification variables
+// with their actual types. "zonk" is the name which the GHC Haskell compiler
+// uses for this transformation, whimsically claiming that zonk is named "after
+// the sound it makes".
+func zonk(typ *types.Type) *types.Type {
+	switch typ.Kind {
+	case types.KindUnification:
+		return zonk(typ.Uni.Find().Data)
+	case types.KindList:
+		return &types.Type{Kind: types.KindList, Val: zonk(typ.Val)}
+	case types.KindMap:
+		return &types.Type{Kind: types.KindMap, Key: zonk(typ.Key), Val: zonk(typ.Val)}
+	case types.KindStruct:
+		m := make(map[string]*types.Type)
+		for k, v := range typ.Map {
+			m[k] = zonk(v)
+		}
+		return &types.Type{Kind: types.KindStruct, Map: m, Ord: typ.Ord}
+	case types.KindFunc:
+		m := make(map[string]*types.Type)
+		for k, v := range typ.Map {
+			m[k] = zonk(v)
+		}
+		return &types.Type{Kind: types.KindFunc, Map: m, Ord: typ.Ord, Out: zonk(typ.Out)}
+	case types.KindVariant:
+		// TODO: what is a variant? With that name, it sounds like it should be a
+		// dynamic type, but it's not. It wraps the  static type typ.Var. What is
+		// it?
+		return &types.Type{Kind: types.KindVariant, Var: zonk(typ.Var)}
+	default:
+		return typ
+	}
+}
+
+func containsUnificationVariable(typ *types.Type) bool {
+	switch typ.Kind {
+	case types.KindUnification:
+		return true
+	case types.KindList:
+		return containsUnificationVariable(typ.Val)
+	case types.KindMap:
+		return containsUnificationVariable(typ.Key) || containsUnificationVariable(typ.Val)
+	case types.KindStruct:
+		for _, v := range typ.Map {
+			if containsUnificationVariable(v) {
+				return true
+			}
+		}
+		return false
+	case types.KindFunc:
+		for _, v := range typ.Map {
+			if containsUnificationVariable(v) {
+				return true
+			}
+		}
+		return containsUnificationVariable(typ.Out)
+	case types.KindVariant:
+		// TODO: what's a variant?
+		return containsUnificationVariable(typ.Var)
+	default:
+		return false
+	}
 }

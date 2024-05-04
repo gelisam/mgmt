@@ -5874,7 +5874,14 @@ func (obj *ExprStr) Unify() ([]interfaces.Invariant, error) {
 
 // Infer XXX
 func (obj *ExprStr) Infer() (*types.Type, []*interfaces.UnificationInvariant, error) {
-	return types.TypeStr, []*interfaces.UnificationInvariant{}, nil
+	inferredType := types.TypeStr
+	return inferredType, []*interfaces.UnificationInvariant{
+		{
+			Expr:   obj,
+			Expect: inferredType,
+			Actual: inferredType,
+		},
+	}, nil
 }
 
 // Check XXX
